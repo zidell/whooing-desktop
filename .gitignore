@@ -25,6 +25,7 @@ Thumbs.db
 !.vscode/extensions.json
 .idea/
 *.swp
+.history/
 
 # Internal project notes (not for public repo)
 CLAUDE.md
