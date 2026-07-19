@@ -43,17 +43,23 @@ jobs:
       - name: install npm dependencies
         run: npm ci
 
+      # Tauri 번들러는 APPLE_CERTIFICATE 등이 "존재하기만" 해도(빈 문자열이어도) 서명을 시도한다.
+      # 시크릿이 비어있는 채로 env에 주입하면 빈 인증서 import가 실패하므로,
+      # 시크릿이 실제로 채워진 경우에만 GITHUB_ENV에 등록해 env var 자체가 없도록 한다.
+      - name: configure macOS signing env
+        if: matrix.platform == 'macos-latest' && secrets.APPLE_CERTIFICATE != ''
+        run: |
+          echo "APPLE_CERTIFICATE=${{ secrets.APPLE_CERTIFICATE }}" >> "$GITHUB_ENV"
+          echo "APPLE_CERTIFICATE_PASSWORD=${{ secrets.APPLE_CERTIFICATE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "APPLE_SIGNING_IDENTITY=${{ secrets.APPLE_SIGNING_IDENTITY }}" >> "$GITHUB_ENV"
+          echo "APPLE_ID=${{ secrets.APPLE_ID }}" >> "$GITHUB_ENV"
+          echo "APPLE_PASSWORD=${{ secrets.APPLE_PASSWORD }}" >> "$GITHUB_ENV"
+          echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}" >> "$GITHUB_ENV"
+
       - name: build and release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS 코드서명 + 노터라이즈 (시크릿 미설정 시 서명 없이 빌드됨)
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "Whooing Desktop ${{ github.ref_name }}"
