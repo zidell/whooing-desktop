@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-notify-new-message"
+description = "Enables the notify_new_message command without any pre-configured scope."
+commands.allow = ["notify_new_message"]
+
+[[permission]]
+identifier = "deny-notify-new-message"
+description = "Denies the notify_new_message command without any pre-configured scope."
+commands.deny = ["notify_new_message"]
