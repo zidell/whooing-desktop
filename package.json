@@ -1,7 +1,7 @@
 {
   "name": "whooing-desktop",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Whooing (whooing.com) desktop app — Tauri wrapper",
   "type": "module",
   "scripts": {

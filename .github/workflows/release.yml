@@ -34,6 +34,9 @@ jobs:
 
       - name: setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          # macOS는 universal binary(Apple Silicon + Intel)로 빌드하기 위해 두 타겟 모두 설치
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: cache Rust build artifacts
         uses: swatinem/rust-cache@v2
@@ -70,6 +73,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          # macOS만 universal-apple-darwin(Apple Silicon + Intel 통합 바이너리)로 빌드
+          args: ${{ matrix.platform == 'macos-latest' && '--target universal-apple-darwin' || '' }}
           tagName: ${{ github.ref_name }}
           releaseName: "Whooing Desktop ${{ github.ref_name }}"
           releaseBody: "See the assets below to download this version."
