@@ -49,12 +49,10 @@
 
 - [x] GitHub 저장소 생성 (`zidell/whooing-desktop`, public)
 - [x] 로컬 개발 환경 세팅
-- [x] Tauri 프로젝트 초기 세팅 — `app.windows[0].url`을 `https://whooing.com`으로 지정하는 원격 URL 래퍼 구조. 아이콘은 Tauri 기본 placeholder(추후 실제 브랜드 로고로 교체 필요)
-- [x] CI 매트릭스(macOS/Windows/Linux) 빌드 파이프라인 구성 (`.github/workflows/release.yml`, tauri-action, 태그 `v*.*.*` push 트리거) — 태그 push로 실제 검증 전
-- [ ] macOS 코드서명/노터라이즈 시크릿 등록 (`APPLE_CERTIFICATE` 등 GitHub Secrets)
-- [ ] macOS 빌드 (다이렉트 다운로드용 .dmg, 서명/노터라이즈)
-- [ ] Windows 빌드 (다이렉트 다운로드)
-- [ ] Linux 빌드 (다이렉트 다운로드용 deb/rpm/AppImage)
+- [x] Tauri 프로젝트 초기 세팅 — `app.windows[0].url`을 `https://whooing.com`으로 지정하는 원격 URL 래퍼 구조. 앱 아이콘은 실제 후잉 로고(`logo_app_1024.png`) 적용 완료
+- [x] CI 매트릭스(macOS/Windows/Linux) 빌드 파이프라인 구성 (`.github/workflows/release.yml`, tauri-action, 태그 `v*.*.*` push 트리거) — `workflow_dispatch`로 3-way 매트릭스 전부 그린 확인(.dmg/.app.tar.gz, .exe/.msi, .deb/.rpm/.AppImage 산출물 정상 생성). 검증용 draft release는 정리함
+- [ ] macOS 코드서명/노터라이즈 시크릿 등록 (`APPLE_CERTIFICATE` 등 GitHub Secrets) — 현재 macOS 산출물은 미서명 상태로만 빌드됨
+- [ ] Windows 코드서명 여부 결정 (선택 사항)
 - [ ] 웹 레포 데스크톱 다운로드 리다이렉트 → GitHub Release 연동으로 교체
 - [ ] Homebrew Cask formula 등록
 - [ ] Windows: PWABuilder vs MSIX 결정 → MS Store 제출
