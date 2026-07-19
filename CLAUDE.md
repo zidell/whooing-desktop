@@ -49,8 +49,9 @@
 
 - [x] GitHub 저장소 생성 (`zidell/whooing-desktop`, public)
 - [x] 로컬 개발 환경 세팅
-- [ ] Tauri 프로젝트 초기 세팅 (Rust/Node 툴체인 확인부터)
-- [ ] CI 매트릭스(macOS/Windows/Linux) 빌드 파이프라인 구성 (tauri-action)
+- [x] Tauri 프로젝트 초기 세팅 — `app.windows[0].url`을 `https://whooing.com`으로 지정하는 원격 URL 래퍼 구조. 아이콘은 Tauri 기본 placeholder(추후 실제 브랜드 로고로 교체 필요)
+- [x] CI 매트릭스(macOS/Windows/Linux) 빌드 파이프라인 구성 (`.github/workflows/release.yml`, tauri-action, 태그 `v*.*.*` push 트리거) — 태그 push로 실제 검증 전
+- [ ] macOS 코드서명/노터라이즈 시크릿 등록 (`APPLE_CERTIFICATE` 등 GitHub Secrets)
 - [ ] macOS 빌드 (다이렉트 다운로드용 .dmg, 서명/노터라이즈)
 - [ ] Windows 빌드 (다이렉트 다운로드)
 - [ ] Linux 빌드 (다이렉트 다운로드용 deb/rpm/AppImage)
