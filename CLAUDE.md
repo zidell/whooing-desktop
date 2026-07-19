@@ -52,10 +52,10 @@
 - [x] Tauri 프로젝트 초기 세팅 — `app.windows[0].url`을 `https://whooing.com`으로 지정하는 원격 URL 래퍼 구조. 앱 아이콘은 실제 후잉 로고(`logo_app_1024.png`) 적용 완료
 - [x] CI 매트릭스(macOS/Windows/Linux) 빌드 파이프라인 구성 (`.github/workflows/release.yml`, tauri-action, 태그 `v*.*.*` push 트리거) — `workflow_dispatch`로 3-way 매트릭스 전부 그린 확인(.dmg/.app.tar.gz, .exe/.msi, .deb/.rpm/.AppImage 산출물 정상 생성). 검증용 draft release는 정리함
 - [x] macOS 코드서명/노터라이즈 — 기존 Apple Developer 계정(todesktop에도 써온 계정)의 Developer ID 인증서로 GitHub Secrets 등록 완료. CI에서 서명+노터라이즈(`Accepted`) 확인, `.dmg`/`.app` 정상 서명됨
-- [x] 실제 버전 태그(`v0.1.0`) push → 태그 트리거 릴리즈 빌드 end-to-end 검증 완료(3-way 그린, macOS 서명+노터라이즈 `Accepted`). GitHub Release `v0.1.0`은 아직 **draft 상태로 보류**(공개는 웹 레포 리다이렉트 등 후속 준비 후 결정)
+- [x] 실제 버전 태그(`v0.1.0`) push → 태그 트리거 릴리즈 빌드 end-to-end 검증 완료(3-way 그린, macOS 서명+노터라이즈 `Accepted`). GitHub Release `v0.1.0` **공개(publish) 완료** — https://github.com/zidell/whooing-desktop/releases/tag/v0.1.0
 - [ ] Windows 코드서명 여부 결정 (선택 사항)
 - [ ] 웹 레포 데스크톱 다운로드 리다이렉트 → GitHub Release 연동으로 교체
-- [ ] Homebrew Cask formula 등록 (release publish 이후 안정적 URL 확보되면 진행)
+- [ ] Homebrew Cask formula 등록 (안정적 URL 확보됐으니 바로 진행 가능)
 - [ ] MS Store: Microsoft Partner Center 개발자 계정 가입 필요(현재 미보유, 사용자 액션 대기) → 가입 후 PWABuilder로 MSIX 생성해 제출
 - [ ] Linux: Snap Store 제출
 - [ ] Linux: Flathub 제출 (후순위)
