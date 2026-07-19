@@ -10,6 +10,16 @@
 - **Windows**: `.msi` 또는 `.exe`
 - **Linux**: `.deb`, `.rpm`, `.AppImage`
 
+### macOS - Homebrew
+
+[Homebrew](https://brew.sh)가 설치되어 있다면 다음 명령으로도 설치할 수 있습니다.
+
+```sh
+brew install --cask whooing
+```
+
+> Homebrew Cask 등록은 [homebrew-cask#275891](https://github.com/Homebrew/homebrew-cask/pull/275891) PR로 심사 중입니다. 머지 전까지는 위 Releases 페이지의 `.dmg`를 이용해 주세요.
+
 데스크톱 앱 없이도 웹 브라우저에서 바로 이용할 수 있습니다. 👉 **https://whooing.com**
 
 ## 문의
