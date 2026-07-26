@@ -69,6 +69,7 @@ jobs:
           " "$ver"
           sed -i.bak "s/^version = \".*\"/version = \"$ver\"/" src-tauri/Cargo.toml
           rm -f src-tauri/Cargo.toml.bak
+          echo "MSIX_VERSION=$ver.0" >> "$GITHUB_ENV"
 
       # Tauri 번들러는 APPLE_CERTIFICATE 등이 "존재하기만" 해도(빈 문자열이어도) 서명을 시도한다.
       # 시크릿이 비어있는 채로 env에 주입하면 빈 인증서 import가 실패하므로,
@@ -130,6 +131,88 @@ jobs:
           cp "$msi" "Whooing_Windows_x64.msi"
           cp "$exe" "Whooing_Windows_x64-setup.exe"
           gh release upload "${{ inputs.tag || github.ref_name }}" "Whooing_Windows_x64.msi" "Whooing_Windows_x64-setup.exe" --clobber
+
+      # MS Store 제출용 MSIX. PWABuilder가 만드는 별개의 PWA 래퍼 대신, 이 레포가
+      # 실제로 빌드한 Tauri 앱을 Desktop Bridge 방식으로 MSIX에 담는다.
+      # Package Identity/Publisher는 Partner Center의 기존 앱(Store ID 9ND7MPSBWTL1)
+      # 등록 값과 정확히 일치해야 "새 앱"이 아니라 "업데이트"로 인식된다.
+      - name: locate Windows SDK tools for MSIX
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $sdkRoot = "C:\Program Files (x86)\Windows Kits\10\bin"
+          $makeappx = Get-ChildItem -Path $sdkRoot -Recurse -Filter "makeappx.exe" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1
+          $signtool = Get-ChildItem -Path $sdkRoot -Recurse -Filter "signtool.exe" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1
+          if (-not $makeappx) { throw "makeappx.exe not found under $sdkRoot" }
+          if (-not $signtool) { throw "signtool.exe not found under $sdkRoot" }
+          "MAKEAPPX_PATH=$($makeappx.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SIGNTOOL_PATH=$($signtool.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: build MSIX package
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $payload = "msix-payload"
+          New-Item -ItemType Directory -Force -Path $payload | Out-Null
+          Copy-Item "src-tauri\target\release\whooing-desktop.exe" "$payload\whooing-desktop.exe"
+          Copy-Item "src-tauri\icons\Square44x44Logo.png" "$payload\Square44x44Logo.png"
+          Copy-Item "src-tauri\icons\Square150x150Logo.png" "$payload\Square150x150Logo.png"
+          Copy-Item "src-tauri\icons\StoreLogo.png" "$payload\StoreLogo.png"
+
+          $manifest = @'
+          <?xml version="1.0" encoding="utf-8"?>
+          <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+                   xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+                   xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+                   xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+                   IgnorableNamespaces="uap uap10 rescap">
+            <Identity Name="7061CE15.591355A585FB1" Publisher="CN=3180036E-B428-4A8F-BD38-E4C6B5C64CBB" Version="__MSIX_VERSION__" ProcessorArchitecture="x64" />
+            <Properties>
+              <DisplayName>Whooing</DisplayName>
+              <PublisherDisplayName>후잉가계부</PublisherDisplayName>
+              <Logo>StoreLogo.png</Logo>
+            </Properties>
+            <Resources>
+              <Resource Language="en-us" />
+            </Resources>
+            <Dependencies>
+              <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
+            </Dependencies>
+            <Capabilities>
+              <rescap:Capability Name="runFullTrust" />
+            </Capabilities>
+            <Applications>
+              <Application Id="WhooingDesktop" Executable="whooing-desktop.exe" EntryPoint="Windows.FullTrustApplication">
+                <uap:VisualElements DisplayName="Whooing" Description="Whooing (whooing.com) desktop app"
+                  Square150x150Logo="Square150x150Logo.png" Square44x44Logo="Square44x44Logo.png"
+                  BackgroundColor="#464646" />
+              </Application>
+            </Applications>
+          </Package>
+          '@
+          $manifest = $manifest -replace "__MSIX_VERSION__", $env:MSIX_VERSION
+          Set-Content -Path "$payload\AppxManifest.xml" -Value $manifest -Encoding utf8
+
+          & $env:MAKEAPPX_PATH pack /d $payload /p Whooing_Windows_x64.msix /o
+          if ($LASTEXITCODE -ne 0) { throw "makeappx pack failed with exit code $LASTEXITCODE" }
+
+          $cert = New-SelfSignedCertificate -Type Custom -KeyUsage DigitalSignature `
+            -CertStoreLocation "Cert:\CurrentUser\My" `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}") `
+            -Subject "CN=3180036E-B428-4A8F-BD38-E4C6B5C64CBB" -FriendlyName "whooing-desktop-msix-ci"
+          $password = ConvertTo-SecureString -String "ci-build-only" -Force -AsPlainText
+          Export-PfxCertificate -Cert "Cert:\CurrentUser\My\$($cert.Thumbprint)" -FilePath ci-signing.pfx -Password $password | Out-Null
+          & $env:SIGNTOOL_PATH sign /fd SHA256 /f ci-signing.pfx /p "ci-build-only" Whooing_Windows_x64.msix
+          if ($LASTEXITCODE -ne 0) { throw "signtool sign failed with exit code $LASTEXITCODE" }
+
+      - name: upload MSIX to release
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release upload "${{ inputs.tag || github.ref_name }}" "Whooing_Windows_x64.msix" --clobber
 
       - name: upload version-less stable-name copies (Linux)
         if: matrix.platform == 'ubuntu-22.04'
