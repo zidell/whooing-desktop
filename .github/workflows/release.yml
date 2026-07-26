@@ -80,3 +80,43 @@ jobs:
           releaseBody: "See the assets below to download this version."
           releaseDraft: true
           prerelease: false
+
+      # 웹사이트 다운로드 링크가 릴리즈마다 안 바뀌도록, 버전 정보 없는 고정 파일명 사본을
+      # 같은 릴리즈에 추가로 올린다. https://github.com/<repo>/releases/latest/download/<파일명>
+      # 형태로 항상 최신 릴리즈의 이 사본을 가리킬 수 있다.
+      - name: upload version-less stable-name copies (macOS)
+        if: matrix.platform == 'macos-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          dmg=$(find src-tauri/target -path "*/bundle/dmg/*.dmg" | head -n1)
+          cp "$dmg" "Whooing_macOS_universal.dmg"
+          gh release upload "${{ github.ref_name }}" "Whooing_macOS_universal.dmg" --clobber
+
+      - name: upload version-less stable-name copies (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          msi=$(find src-tauri/target -path "*/bundle/msi/*.msi" | head -n1)
+          exe=$(find src-tauri/target -path "*/bundle/nsis/*.exe" | head -n1)
+          cp "$msi" "Whooing_Windows_x64.msi"
+          cp "$exe" "Whooing_Windows_x64-setup.exe"
+          gh release upload "${{ github.ref_name }}" "Whooing_Windows_x64.msi" "Whooing_Windows_x64-setup.exe" --clobber
+
+      - name: upload version-less stable-name copies (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          deb=$(find src-tauri/target -path "*/bundle/deb/*.deb" | head -n1)
+          rpm=$(find src-tauri/target -path "*/bundle/rpm/*.rpm" | head -n1)
+          appimage=$(find src-tauri/target -path "*/bundle/appimage/*.AppImage" | head -n1)
+          cp "$deb" "Whooing_Linux_amd64.deb"
+          cp "$rpm" "Whooing_Linux_x86_64.rpm"
+          cp "$appimage" "Whooing_Linux_amd64.AppImage"
+          gh release upload "${{ github.ref_name }}" "Whooing_Linux_amd64.deb" "Whooing_Linux_x86_64.rpm" "Whooing_Linux_amd64.AppImage" --clobber
