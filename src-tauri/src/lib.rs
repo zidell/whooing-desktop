@@ -30,6 +30,23 @@ const EXTERNAL_LINK_SCRIPT: &str = r#"
 })();
 "#;
 
+// Tauri는 Electron과 달리 기본 앱 메뉴/새로고침 단축키를 제공하지 않고,
+// 임베드 웹뷰(WKWebView/WebView2/WebKitGTK)도 브라우저 크롬 없이는 Ctrl+R/Cmd+R을
+// 자체적으로 바인딩하지 않는다(Windows WebView2도 실측 결과 동작 안 함). 3개 OS 공통으로
+// 새로고침을 보장하기 위해 직접 키 리스너를 주입한다.
+const RELOAD_SHORTCUT_SCRIPT: &str = r#"
+(function () {
+  document.addEventListener('keydown', function (e) {
+    var key = e.key ? e.key.toLowerCase() : '';
+    if ((e.metaKey || e.ctrlKey) && key === 'r') {
+      e.preventDefault();
+      e.stopPropagation();
+      window.location.reload();
+    }
+  }, true);
+})();
+"#;
+
 fn is_app_origin(host: &str) -> bool {
   host == APP_ORIGIN_HOST || host.ends_with(&format!(".{APP_ORIGIN_HOST}"))
 }
@@ -152,6 +169,7 @@ pub fn run() {
       .min_inner_size(960.0, 600.0)
       .resizable(true)
       .initialization_script(EXTERNAL_LINK_SCRIPT)
+      .initialization_script(RELOAD_SHORTCUT_SCRIPT)
       .on_navigation(move |url| match url.host_str() {
         Some(host) if is_app_origin(host) => true,
         _ => {
