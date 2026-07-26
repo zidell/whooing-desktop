@@ -1,7 +1,9 @@
 name: auto-tag
 
 # main에 push될 때마다 patch 버전을 자동으로 올려 태그를 만든다.
-# 이 태그 push가 release.yml을 트리거해서 3-OS 빌드+서명+공개까지 이어진다.
+# 기본 GITHUB_TOKEN으로 push한 태그는 release.yml의 push 트리거를 (무한루프
+# 방지 정책 때문에) 발동시키지 못하므로, 태그를 만든 뒤 release.yml의
+# workflow_dispatch를 명시적으로 호출해서 이어준다.
 on:
   push:
     branches:
@@ -9,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   tag:
@@ -38,3 +41,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git tag "${{ steps.next.outputs.tag }}"
           git push origin "${{ steps.next.outputs.tag }}"
+
+      - name: trigger release workflow
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --ref main -f tag="${{ steps.next.outputs.tag }}"
