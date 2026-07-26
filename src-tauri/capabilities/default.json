@@ -5,9 +5,16 @@
   "windows": [
     "main"
   ],
+  "remote": {
+    "urls": [
+      "https://whooing.com",
+      "https://*.whooing.com"
+    ]
+  },
   "permissions": [
     "core:default",
     "allow-set-notification-badge",
-    "allow-notify-new-message"
+    "allow-notify-new-message",
+    "allow-open-external"
   ]
 }
