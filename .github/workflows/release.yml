@@ -40,8 +40,9 @@ jobs:
       - name: setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          # macOS는 universal binary(Apple Silicon + Intel)로 빌드하기 위해 두 타겟 모두 설치
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          # macOS는 universal binary(Apple Silicon + Intel)로 빌드하기 위해 두 타겟 모두 설치.
+          # Windows는 x64(호스트 기본 타겟)에 더해 MSIX용 arm64를 추가로 설치.
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.platform == 'windows-latest' && 'aarch64-pc-windows-msvc' || '' }}
 
       - name: cache Rust build artifacts
         uses: swatinem/rust-cache@v2
@@ -148,25 +149,27 @@ jobs:
           "MAKEAPPX_PATH=$($makeappx.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "SIGNTOOL_PATH=$($signtool.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: build MSIX package
+      - name: build arm64 binary for MSIX
+        if: matrix.platform == 'windows-latest'
+        working-directory: src-tauri
+        run: cargo build --release --target aarch64-pc-windows-msvc
+
+      - name: build MSIX package (x64 + arm64 bundle)
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: |
-          $payload = "msix-payload"
-          New-Item -ItemType Directory -Force -Path $payload | Out-Null
-          Copy-Item "src-tauri\target\release\whooing-desktop.exe" "$payload\whooing-desktop.exe"
-          Copy-Item "src-tauri\icons\Square44x44Logo.png" "$payload\Square44x44Logo.png"
-          Copy-Item "src-tauri\icons\Square150x150Logo.png" "$payload\Square150x150Logo.png"
-          Copy-Item "src-tauri\icons\StoreLogo.png" "$payload\StoreLogo.png"
+          $ErrorActionPreference = "Stop"
+          $bundleInput = "msix-bundle-input"
+          New-Item -ItemType Directory -Force -Path $bundleInput | Out-Null
 
-          $manifest = @'
+          $manifestTemplate = @'
           <?xml version="1.0" encoding="utf-8"?>
           <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
                    xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
                    xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
                    xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
                    IgnorableNamespaces="uap uap10 rescap">
-            <Identity Name="7061CE15.591355A585FB1" Publisher="CN=3180036E-B428-4A8F-BD38-E4C6B5C64CBB" Version="__MSIX_VERSION__" ProcessorArchitecture="x64" />
+            <Identity Name="7061CE15.591355A585FB1" Publisher="CN=3180036E-B428-4A8F-BD38-E4C6B5C64CBB" Version="__MSIX_VERSION__" ProcessorArchitecture="__ARCH__" />
             <Properties>
               <DisplayName>후잉가계부</DisplayName>
               <PublisherDisplayName>후잉가계부</PublisherDisplayName>
@@ -190,19 +193,37 @@ jobs:
             </Applications>
           </Package>
           '@
-          $manifest = $manifest -replace "__MSIX_VERSION__", $env:MSIX_VERSION
-          Set-Content -Path "$payload\AppxManifest.xml" -Value $manifest -Encoding utf8
 
-          & $env:MAKEAPPX_PATH pack /d $payload /p Whooing_Windows_x64.msix /o
-          if ($LASTEXITCODE -ne 0) { throw "makeappx pack failed with exit code $LASTEXITCODE" }
+          $architectures = @(
+            @{ Arch = "x64"; ExePath = "src-tauri\target\release\whooing-desktop.exe" },
+            @{ Arch = "arm64"; ExePath = "src-tauri\target\aarch64-pc-windows-msvc\release\whooing-desktop.exe" }
+          )
+
+          foreach ($a in $architectures) {
+            $arch = $a.Arch
+            if (-not (Test-Path $a.ExePath)) { throw "binary not found for $arch at $($a.ExePath)" }
+
+            $payload = "msix-payload-$arch"
+            New-Item -ItemType Directory -Force -Path $payload | Out-Null
+            Copy-Item $a.ExePath "$payload\whooing-desktop.exe"
+            Copy-Item "src-tauri\icons\Square44x44Logo.png" "$payload\Square44x44Logo.png"
+            Copy-Item "src-tauri\icons\Square150x150Logo.png" "$payload\Square150x150Logo.png"
+            Copy-Item "src-tauri\icons\StoreLogo.png" "$payload\StoreLogo.png"
+
+            $manifest = $manifestTemplate -replace "__MSIX_VERSION__", $env:MSIX_VERSION -replace "__ARCH__", $arch
+            Set-Content -Path "$payload\AppxManifest.xml" -Value $manifest -Encoding utf8
+
+            $msixName = "Whooing_Windows_$arch.msix"
+            & $env:MAKEAPPX_PATH pack /d $payload /p $msixName /o
+            if ($LASTEXITCODE -ne 0) { throw "makeappx pack failed for $arch with exit code $LASTEXITCODE" }
+
+            Copy-Item $msixName "$bundleInput\$msixName"
+          }
 
           # Partner Center: 이 앱은 예전에 .msixbundle/.appxbundle로 제출된 이력이 있어서
-          # 후속 제출도 반드시 번들이어야 함(단일 .msix는 거부됨). 아키텍처가 x64 하나뿐이라도
-          # bundle 명령으로 감싸야 한다.
-          $bundleInput = "msix-bundle-input"
-          New-Item -ItemType Directory -Force -Path $bundleInput | Out-Null
-          Copy-Item "Whooing_Windows_x64.msix" "$bundleInput\Whooing_Windows_x64.msix"
-          & $env:MAKEAPPX_PATH bundle /d $bundleInput /p Whooing_Windows_x64.msixbundle /o
+          # 후속 제출도 반드시 번들이어야 함(단일 .msix는 거부됨). x64/arm64 두 패키지를
+          # 한 번들에 담아서 기기별로 알맞은 아키텍처가 자동으로 선택되게 한다.
+          & $env:MAKEAPPX_PATH bundle /d $bundleInput /p Whooing_Windows.msixbundle /o
           if ($LASTEXITCODE -ne 0) { throw "makeappx bundle failed with exit code $LASTEXITCODE" }
 
           $cert = New-SelfSignedCertificate -Type Custom -KeyUsage DigitalSignature `
@@ -211,7 +232,7 @@ jobs:
             -Subject "CN=3180036E-B428-4A8F-BD38-E4C6B5C64CBB" -FriendlyName "whooing-desktop-msix-ci"
           $password = ConvertTo-SecureString -String "ci-build-only" -Force -AsPlainText
           Export-PfxCertificate -Cert "Cert:\CurrentUser\My\$($cert.Thumbprint)" -FilePath ci-signing.pfx -Password $password | Out-Null
-          & $env:SIGNTOOL_PATH sign /fd SHA256 /f ci-signing.pfx /p "ci-build-only" Whooing_Windows_x64.msixbundle
+          & $env:SIGNTOOL_PATH sign /fd SHA256 /f ci-signing.pfx /p "ci-build-only" Whooing_Windows.msixbundle
           if ($LASTEXITCODE -ne 0) { throw "signtool sign failed with exit code $LASTEXITCODE" }
 
       - name: upload MSIX to release
@@ -221,7 +242,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release upload "${{ inputs.tag || github.ref_name }}" "Whooing_Windows_x64.msixbundle" --clobber
+          gh release upload "${{ inputs.tag || github.ref_name }}" "Whooing_Windows.msixbundle" --clobber
 
       - name: upload version-less stable-name copies (Linux)
         if: matrix.platform == 'ubuntu-22.04'
