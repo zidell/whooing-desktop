@@ -5,6 +5,11 @@ on:
     tags:
       - "v*.*.*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "대상 릴리즈 태그 (비우면 실행된 ref 이름 사용). main 브랜치에서 기존 릴리즈에 자산을 추가할 때 지정."
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -75,8 +80,8 @@ jobs:
         with:
           # macOS만 universal-apple-darwin(Apple Silicon + Intel 통합 바이너리)로 빌드
           args: ${{ matrix.platform == 'macos-latest' && '--target universal-apple-darwin' || '' }}
-          tagName: ${{ github.ref_name }}
-          releaseName: "Whooing Desktop ${{ github.ref_name }}"
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: "Whooing Desktop ${{ inputs.tag || github.ref_name }}"
           releaseBody: "See the assets below to download this version."
           releaseDraft: true
           prerelease: false
@@ -92,7 +97,7 @@ jobs:
           set -euo pipefail
           dmg=$(find src-tauri/target -path "*/bundle/dmg/*.dmg" | head -n1)
           cp "$dmg" "Whooing_macOS_universal.dmg"
-          gh release upload "${{ github.ref_name }}" "Whooing_macOS_universal.dmg" --clobber
+          gh release upload "${{ inputs.tag || github.ref_name }}" "Whooing_macOS_universal.dmg" --clobber
 
       - name: upload version-less stable-name copies (Windows)
         if: matrix.platform == 'windows-latest'
@@ -105,7 +110,7 @@ jobs:
           exe=$(find src-tauri/target -path "*/bundle/nsis/*.exe" | head -n1)
           cp "$msi" "Whooing_Windows_x64.msi"
           cp "$exe" "Whooing_Windows_x64-setup.exe"
-          gh release upload "${{ github.ref_name }}" "Whooing_Windows_x64.msi" "Whooing_Windows_x64-setup.exe" --clobber
+          gh release upload "${{ inputs.tag || github.ref_name }}" "Whooing_Windows_x64.msi" "Whooing_Windows_x64-setup.exe" --clobber
 
       - name: upload version-less stable-name copies (Linux)
         if: matrix.platform == 'ubuntu-22.04'
@@ -119,4 +124,4 @@ jobs:
           cp "$deb" "Whooing_Linux_amd64.deb"
           cp "$rpm" "Whooing_Linux_x86_64.rpm"
           cp "$appimage" "Whooing_Linux_amd64.AppImage"
-          gh release upload "${{ github.ref_name }}" "Whooing_Linux_amd64.deb" "Whooing_Linux_x86_64.rpm" "Whooing_Linux_amd64.AppImage" --clobber
+          gh release upload "${{ inputs.tag || github.ref_name }}" "Whooing_Linux_amd64.deb" "Whooing_Linux_x86_64.rpm" "Whooing_Linux_amd64.AppImage" --clobber
