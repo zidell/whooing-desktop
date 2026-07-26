@@ -1,0 +1,40 @@
+name: auto-tag
+
+# main에 push될 때마다 patch 버전을 자동으로 올려 태그를 만든다.
+# 이 태그 push가 release.yml을 트리거해서 3-OS 빌드+서명+공개까지 이어진다.
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: compute next patch version
+        id: next
+        run: |
+          set -euo pipefail
+          latest=$(git tag --list 'v*.*.*' | sort -V | tail -n1)
+          if [ -z "$latest" ]; then
+            latest="v0.0.0"
+          fi
+          ver="${latest#v}"
+          IFS='.' read -r major minor patch <<< "$ver"
+          next="v${major}.${minor}.$((patch + 1))"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+
+      - name: create and push tag
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.next.outputs.tag }}"
+          git push origin "${{ steps.next.outputs.tag }}"
