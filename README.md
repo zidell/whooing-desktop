@@ -20,6 +20,22 @@ brew install --cask whooing
 
 > Homebrew Cask 등록은 [homebrew-cask#275891](https://github.com/Homebrew/homebrew-cask/pull/275891) PR로 심사 중입니다. 머지 전까지는 위 Releases 페이지의 `.dmg`를 이용해 주세요.
 
+### Linux
+
+받은 패키지 파일을 배포판에 맞는 패키지 관리자로 설치하면 의존성이 자동으로 해결됩니다.
+
+```sh
+# Debian/Ubuntu 계열 (.deb)
+sudo apt install ./Whooing_amd64.deb
+
+# Fedora/RHEL 계열 (.rpm)
+sudo dnf install ./Whooing-x86_64.rpm
+
+# AppImage (배포판 무관, 설치 없이 바로 실행)
+chmod +x Whooing_amd64.AppImage
+./Whooing_amd64.AppImage
+```
+
 데스크톱 앱 없이도 웹 브라우저에서 바로 이용할 수 있습니다. 👉 **https://whooing.com**
 
 ## 문의
