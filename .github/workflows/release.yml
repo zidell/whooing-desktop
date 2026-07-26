@@ -168,7 +168,7 @@ jobs:
                    IgnorableNamespaces="uap uap10 rescap">
             <Identity Name="7061CE15.591355A585FB1" Publisher="CN=3180036E-B428-4A8F-BD38-E4C6B5C64CBB" Version="__MSIX_VERSION__" ProcessorArchitecture="x64" />
             <Properties>
-              <DisplayName>Whooing</DisplayName>
+              <DisplayName>후잉가계부</DisplayName>
               <PublisherDisplayName>후잉가계부</PublisherDisplayName>
               <Logo>StoreLogo.png</Logo>
             </Properties>
@@ -183,7 +183,7 @@ jobs:
             </Capabilities>
             <Applications>
               <Application Id="WhooingDesktop" Executable="whooing-desktop.exe" EntryPoint="Windows.FullTrustApplication">
-                <uap:VisualElements DisplayName="Whooing" Description="Whooing (whooing.com) desktop app"
+                <uap:VisualElements DisplayName="후잉가계부" Description="Whooing (whooing.com) desktop app"
                   Square150x150Logo="Square150x150Logo.png" Square44x44Logo="Square44x44Logo.png"
                   BackgroundColor="#464646" />
               </Application>
