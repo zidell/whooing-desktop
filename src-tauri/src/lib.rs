@@ -156,6 +156,15 @@ pub fn run() {
         }
       });
 
+      // whooing.com 쪽 JS가 "데스크톱 앱에서 열렸는지, 몇 버전인지"를 판별할 수 있도록
+      // 전역 변수로 노출한다(예: 추후 강제 업데이트 안내 등에 활용 가능). 이 변수의
+      // 존재 여부 자체가 곧 "타우리 데스크톱 앱 여부" 판별 기준이 된다. platform은
+      // navigator.userAgent에 이미 있으므로 중복 노출하지 않는다.
+      let desktop_info_script = format!(
+        "window.__WHOOING_DESKTOP__ = '{}';",
+        app.package_info().version
+      );
+
       // whooing.com(및 서브도메인) 외 도메인으로의 네비게이션은 임베드 웹뷰 안에서
       // 처리하지 않고 시스템 기본 브라우저로 넘긴다(구글 로그인 등 외부 OAuth 포함).
       let navigation_app_handle = app.handle().clone();
@@ -168,6 +177,7 @@ pub fn run() {
       .inner_size(1280.0, 800.0)
       .min_inner_size(960.0, 600.0)
       .resizable(true)
+      .initialization_script(desktop_info_script)
       .initialization_script(EXTERNAL_LINK_SCRIPT)
       .initialization_script(RELOAD_SHORTCUT_SCRIPT)
       .on_navigation(move |url| match url.host_str() {
