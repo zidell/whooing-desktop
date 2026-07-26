@@ -34,6 +34,23 @@ fn is_app_origin(host: &str) -> bool {
   host == APP_ORIGIN_HOST || host.ends_with(&format!(".{APP_ORIGIN_HOST}"))
 }
 
+// whooing://<path>?<query> 형태의 딥링크(예: OAuth 콜백 핸드오프)를
+// https://whooing.com/<path>?<query> 로 변환해 메인 윈도우를 이동시킨다.
+fn handle_deep_link_url(app: &tauri::AppHandle, url: &tauri::Url) {
+  let Some(window) = app.get_webview_window("main") else {
+    return;
+  };
+  let mut target = format!("https://{APP_ORIGIN_HOST}{}", url.path());
+  if let Some(query) = url.query() {
+    target.push('?');
+    target.push_str(query);
+  }
+  if let Ok(parsed) = target.parse() {
+    let _ = window.navigate(parsed);
+  }
+  let _ = window.set_focus();
+}
+
 #[tauri::command]
 fn set_notification_badge(window: tauri::WebviewWindow, count: i64) -> Result<(), String> {
   // macOS(독 숫자 뱃지) / Linux(libunity 지원 환경). Windows는 Tauri에서 숫자 뱃지 미지원.
@@ -60,7 +77,22 @@ fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-  tauri::Builder::default()
+  let mut builder = tauri::Builder::default();
+
+  // 싱글 인스턴스 플러그인은 반드시 제일 먼저 등록해야 한다.
+  // Windows/Linux는 macOS와 달리 딥링크를 OS 이벤트가 아니라 "새 인스턴스 실행(argv)"로
+  // 전달하는데, deep-link feature가 이 argv를 감지해 기존 인스턴스의
+  // deep_link().on_open_url() 이벤트로 그대로 넘겨준다.
+  #[cfg(desktop)]
+  {
+    builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+      if let Some(window) = app.get_webview_window("main") {
+        let _ = window.set_focus();
+      }
+    }));
+  }
+
+  builder
     .plugin(tauri_plugin_opener::init())
     .plugin(tauri_plugin_deep_link::init())
     .invoke_handler(tauri::generate_handler![
@@ -82,25 +114,21 @@ pub fn run() {
       #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
       app.deep_link().register_all()?;
 
-      // whooing://<path>?<query> 형태의 딥링크(예: OAuth 콜백 핸드오프)를
-      // https://whooing.com/<path>?<query> 로 변환해 메인 윈도우를 이동시킨다.
+      // 앱이 딥링크로 "새로" 실행된 경우(콜드 스타트) — 이미 떠 있는 인스턴스에
+      // 붙는 케이스는 single-instance 플러그인이 on_open_url로 넘겨주지만,
+      // 최초 실행 시의 URL은 get_current()로 직접 확인해야 한다.
+      let app_handle_for_current = app.handle().clone();
+      if let Ok(Some(urls)) = app.deep_link().get_current() {
+        for url in urls {
+          handle_deep_link_url(&app_handle_for_current, &url);
+        }
+      }
+
       let deep_link_app_handle = app.handle().clone();
       app.deep_link().on_open_url(move |event| {
-        let Some(url) = event.urls().into_iter().next() else {
-          return;
-        };
-        let Some(window) = deep_link_app_handle.get_webview_window("main") else {
-          return;
-        };
-        let mut target = format!("https://{APP_ORIGIN_HOST}{}", url.path());
-        if let Some(query) = url.query() {
-          target.push('?');
-          target.push_str(query);
+        for url in event.urls() {
+          handle_deep_link_url(&deep_link_app_handle, &url);
         }
-        if let Ok(parsed) = target.parse() {
-          let _ = window.navigate(parsed);
-        }
-        let _ = window.set_focus();
       });
 
       // whooing.com(및 서브도메인) 외 도메인으로의 네비게이션은 임베드 웹뷰 안에서
