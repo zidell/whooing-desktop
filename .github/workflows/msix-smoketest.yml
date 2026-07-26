@@ -1,0 +1,111 @@
+name: msix-smoketest
+
+# MSIX Packaging Tool GUI 없이, Windows SDK의 makeappx.exe/signtool.exe로
+# windows-latest 러너에서 헤드리스로 MSIX를 만들 수 있는지 검증하는 실험용 워크플로.
+# 더미 Package Identity로 빌드하며, 실제 Store 제출과는 무관하다.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoketest:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: locate Windows SDK tools
+        shell: pwsh
+        run: |
+          $sdkRoot = "C:\Program Files (x86)\Windows Kits\10\bin"
+          Write-Host "SDK bin root contents:"
+          Get-ChildItem $sdkRoot | Select-Object Name
+          $makeappx = Get-ChildItem -Path $sdkRoot -Recurse -Filter "makeappx.exe" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1
+          $signtool = Get-ChildItem -Path $sdkRoot -Recurse -Filter "signtool.exe" | Where-Object { $_.FullName -like "*x64*" } | Select-Object -First 1
+          if (-not $makeappx) { throw "makeappx.exe not found under $sdkRoot" }
+          if (-not $signtool) { throw "signtool.exe not found under $sdkRoot" }
+          Write-Host "makeappx: $($makeappx.FullName)"
+          Write-Host "signtool: $($signtool.FullName)"
+          "MAKEAPPX_PATH=$($makeappx.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "SIGNTOOL_PATH=$($signtool.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: cache Rust build artifacts
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: build raw binary (no bundling)
+        working-directory: src-tauri
+        run: cargo build --release
+
+      - name: assemble MSIX payload
+        shell: pwsh
+        run: |
+          $payload = "msix-payload"
+          New-Item -ItemType Directory -Force -Path $payload | Out-Null
+          Copy-Item "src-tauri\target\release\whooing-desktop.exe" "$payload\whooing-desktop.exe"
+          Copy-Item "src-tauri\icons\Square44x44Logo.png" "$payload\Square44x44Logo.png"
+          Copy-Item "src-tauri\icons\Square150x150Logo.png" "$payload\Square150x150Logo.png"
+          Copy-Item "src-tauri\icons\StoreLogo.png" "$payload\StoreLogo.png"
+
+          $manifest = @'
+<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+         xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+         xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+         IgnorableNamespaces="uap uap10 rescap">
+  <Identity Name="WhooingDesktopMsixSmoketest" Publisher="CN=WhooingSmoketest" Version="0.0.1.0" ProcessorArchitecture="x64" />
+  <Properties>
+    <DisplayName>Whooing (smoketest)</DisplayName>
+    <PublisherDisplayName>Whooing Smoketest</PublisherDisplayName>
+    <Logo>StoreLogo.png</Logo>
+  </Properties>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+  <Applications>
+    <Application Id="WhooingDesktop" Executable="whooing-desktop.exe" EntryPoint="Windows.FullTrustApplication">
+      <uap:VisualElements DisplayName="Whooing (smoketest)" Description="MSIX smoketest"
+        Square150x150Logo="Square150x150Logo.png" Square44x44Logo="Square44x44Logo.png"
+        BackgroundColor="#464646" />
+    </Application>
+  </Applications>
+</Package>
+'@
+          Set-Content -Path "$payload\AppxManifest.xml" -Value $manifest -Encoding utf8
+
+      - name: pack MSIX
+        shell: pwsh
+        run: |
+          & $env:MAKEAPPX_PATH pack /d msix-payload /p whooing-smoketest.msix /o
+          if ($LASTEXITCODE -ne 0) { throw "makeappx pack failed with exit code $LASTEXITCODE" }
+
+      - name: generate ephemeral self-signed cert and sign
+        shell: pwsh
+        run: |
+          $cert = New-SelfSignedCertificate -Type Custom -KeyUsage DigitalSignature `
+            -CertStoreLocation "Cert:\CurrentUser\My" `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}") `
+            -Subject "CN=WhooingSmoketest" -FriendlyName "whooing-msix-smoketest"
+          $password = ConvertTo-SecureString -String "smoketest-only" -Force -AsPlainText
+          Export-PfxCertificate -Cert "Cert:\CurrentUser\My\$($cert.Thumbprint)" -FilePath smoketest.pfx -Password $password | Out-Null
+          & $env:SIGNTOOL_PATH sign /fd SHA256 /f smoketest.pfx /p "smoketest-only" whooing-smoketest.msix
+          if ($LASTEXITCODE -ne 0) { throw "signtool sign failed with exit code $LASTEXITCODE" }
+          Write-Host "Signed MSIX size: $((Get-Item whooing-smoketest.msix).Length) bytes"
+
+      - name: upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: whooing-smoketest-msix
+          path: whooing-smoketest.msix
