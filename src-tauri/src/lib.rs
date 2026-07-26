@@ -40,7 +40,15 @@ fn handle_deep_link_url(app: &tauri::AppHandle, url: &tauri::Url) {
   let Some(window) = app.get_webview_window("main") else {
     return;
   };
-  let mut target = format!("https://{APP_ORIGIN_HOST}{}", url.path());
+  // whooing://auth/oauth_deeplink/... 형태는 "auth"가 path가 아니라 host로 파싱되므로
+  // (예: whooing://auth/... -> host="auth", path="/..."), host를 다시 path 앞에 붙여야
+  // 원래 경로(/auth/oauth_deeplink/...)가 복원된다.
+  let host = url.host_str().unwrap_or_default();
+  let mut target = if host.is_empty() {
+    format!("https://{APP_ORIGIN_HOST}{}", url.path())
+  } else {
+    format!("https://{APP_ORIGIN_HOST}/{host}{}", url.path())
+  };
   if let Some(query) = url.query() {
     target.push('?');
     target.push_str(query);
