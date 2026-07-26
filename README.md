@@ -7,8 +7,20 @@
 이 저장소의 [Releases](../../releases) 페이지에서 운영체제에 맞는 파일을 받아 설치하세요.
 
 - **macOS**: `.dmg`
-- **Windows**: `.msi` 또는 `.exe`
+- **Windows**: [Microsoft Store](https://apps.microsoft.com/detail/9ND7MPSBWTL1)에서 설치 (아래 참고)
 - **Linux**: `.deb`, `.rpm`, `.AppImage`
+
+### Windows - Microsoft Store
+
+Windows는 Microsoft Store를 통해 배포합니다. 아래 링크에서 설치하세요.
+
+👉 **https://apps.microsoft.com/detail/9ND7MPSBWTL1**
+
+Windows 기기에서는 아래 스토어 앱 딥링크로 바로 열 수도 있습니다.
+
+```
+ms-windows-store://pdp/?productid=9ND7MPSBWTL1
+```
 
 ### macOS - Homebrew
 
