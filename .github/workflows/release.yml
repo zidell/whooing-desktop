@@ -196,13 +196,22 @@ jobs:
           & $env:MAKEAPPX_PATH pack /d $payload /p Whooing_Windows_x64.msix /o
           if ($LASTEXITCODE -ne 0) { throw "makeappx pack failed with exit code $LASTEXITCODE" }
 
+          # Partner Center: 이 앱은 예전에 .msixbundle/.appxbundle로 제출된 이력이 있어서
+          # 후속 제출도 반드시 번들이어야 함(단일 .msix는 거부됨). 아키텍처가 x64 하나뿐이라도
+          # bundle 명령으로 감싸야 한다.
+          $bundleInput = "msix-bundle-input"
+          New-Item -ItemType Directory -Force -Path $bundleInput | Out-Null
+          Copy-Item "Whooing_Windows_x64.msix" "$bundleInput\Whooing_Windows_x64.msix"
+          & $env:MAKEAPPX_PATH bundle /d $bundleInput /p Whooing_Windows_x64.msixbundle /o
+          if ($LASTEXITCODE -ne 0) { throw "makeappx bundle failed with exit code $LASTEXITCODE" }
+
           $cert = New-SelfSignedCertificate -Type Custom -KeyUsage DigitalSignature `
             -CertStoreLocation "Cert:\CurrentUser\My" `
             -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}") `
             -Subject "CN=3180036E-B428-4A8F-BD38-E4C6B5C64CBB" -FriendlyName "whooing-desktop-msix-ci"
           $password = ConvertTo-SecureString -String "ci-build-only" -Force -AsPlainText
           Export-PfxCertificate -Cert "Cert:\CurrentUser\My\$($cert.Thumbprint)" -FilePath ci-signing.pfx -Password $password | Out-Null
-          & $env:SIGNTOOL_PATH sign /fd SHA256 /f ci-signing.pfx /p "ci-build-only" Whooing_Windows_x64.msix
+          & $env:SIGNTOOL_PATH sign /fd SHA256 /f ci-signing.pfx /p "ci-build-only" Whooing_Windows_x64.msixbundle
           if ($LASTEXITCODE -ne 0) { throw "signtool sign failed with exit code $LASTEXITCODE" }
 
       - name: upload MSIX to release
@@ -212,7 +221,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release upload "${{ inputs.tag || github.ref_name }}" "Whooing_Windows_x64.msix" --clobber
+          gh release upload "${{ inputs.tag || github.ref_name }}" "Whooing_Windows_x64.msixbundle" --clobber
 
       - name: upload version-less stable-name copies (Linux)
         if: matrix.platform == 'ubuntu-22.04'
