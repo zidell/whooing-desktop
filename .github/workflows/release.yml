@@ -257,3 +257,29 @@ jobs:
           cp "$rpm" "Whooing_Linux_x86_64.rpm"
           cp "$appimage" "Whooing_Linux_amd64.AppImage"
           gh release upload "${{ inputs.tag || github.ref_name }}" "Whooing_Linux_amd64.deb" "Whooing_Linux_x86_64.rpm" "Whooing_Linux_amd64.AppImage" --clobber
+
+  # main push마다 릴리즈가 자동 생성되므로 정리 없이는 무한히 쌓인다. 3-OS 빌드가
+  # 전부 성공했을 때만(needs: release) 실행해 최신 30개만 남기고 이전 릴리즈를 삭제한다.
+  # 30개인 이유: Homebrew Cask 초안이 특정 버전의 dmg sha256을 고정 참조하는데,
+  # 지금 릴리즈 속도(v0.1.7~v0.1.12가 24시간 이내)를 감안하면 5개 정도로는 Homebrew
+  # 쪽이 캐스크를 갱신하기도 전에 참조 버전이 삭제돼 brew install이 404 날 위험이 큼.
+  # 30개로 여유를 둬서 그 위험을 낮춤(근본 해결은 아니고 위험 완화용 — 캐스크가
+  # 실제 병합된 뒤에는 참조 버전이 밀려나기 전에 캐스크 쪽 버전도 갱신해야 함).
+  # git 태그는 삭제하지 않는다 — auto-tag.yml의 다음 버전 계산이 태그 존재를 전제하므로
+  # 태그까지 지우면 버전 넘버링에 영향을 줄 수 있음. 삭제 대상은 GitHub Release(및 첨부
+  # 자산)뿐.
+  cleanup:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - name: delete releases older than the latest 30
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release list --repo "${{ github.repository }}" --limit 200 --json tagName -q '.[].tagName' \
+            | tail -n +31 \
+            | while read -r tag; do
+                echo "deleting old release: $tag"
+                gh release delete "$tag" --repo "${{ github.repository }}" --yes
+              done
