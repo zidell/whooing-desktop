@@ -70,7 +70,13 @@ jobs:
           " "$ver"
           sed -i.bak "s/^version = \".*\"/version = \"$ver\"/" src-tauri/Cargo.toml
           rm -f src-tauri/Cargo.toml.bak
-          echo "MSIX_VERSION=$ver.0" >> "$GITHUB_ENV"
+          # MS Store에는 예전 PWABuilder 패키지가 1.0.1.0으로 올라가 있다. 스토어는 같은
+          # Identity 안에서 버전이 가장 높은 패키지를 서빙하므로, 태그 버전(0.1.x)을 그대로
+          # 쓰면 새 Tauri 패키지가 옛 패키지에 밀려 영영 배포되지 않는다. MSIX 매니페스트에
+          # 들어가는 버전에만 major +2 오프셋을 줘서 이를 넘긴다(태그·앱 표시 버전은 그대로라
+          # macOS/Linux/직접 다운로드 등 다른 채널에는 영향 없음).
+          msix_major=$(( ${ver%%.*} + 2 ))
+          echo "MSIX_VERSION=$msix_major.${ver#*.}.0" >> "$GITHUB_ENV"
 
       # Tauri 번들러는 APPLE_CERTIFICATE 등이 "존재하기만" 해도(빈 문자열이어도) 서명을 시도한다.
       # 시크릿이 비어있는 채로 env에 주입하면 빈 인증서 import가 실패하므로,
@@ -223,7 +229,9 @@ jobs:
           # Partner Center: 이 앱은 예전에 .msixbundle/.appxbundle로 제출된 이력이 있어서
           # 후속 제출도 반드시 번들이어야 함(단일 .msix는 거부됨). x64/arm64 두 패키지를
           # 한 번들에 담아서 기기별로 알맞은 아키텍처가 자동으로 선택되게 한다.
-          & $env:MAKEAPPX_PATH bundle /d $bundleInput /p Whooing_Windows.msixbundle /o
+          # /bv 없이 만들면 번들 버전이 0.0.0.0으로 박힌다. 스토어는 번들 제출에서 안쪽
+          # 개별 msix가 아니라 이 번들 버전으로 최신 여부를 판단하므로 반드시 명시해야 한다.
+          & $env:MAKEAPPX_PATH bundle /d $bundleInput /bv $env:MSIX_VERSION /p Whooing_Windows.msixbundle /o
           if ($LASTEXITCODE -ne 0) { throw "makeappx bundle failed with exit code $LASTEXITCODE" }
 
           $cert = New-SelfSignedCertificate -Type Custom -KeyUsage DigitalSignature `
