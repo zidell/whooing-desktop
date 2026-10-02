@@ -1,7 +1,19 @@
 <!doctype html>
-<html>
-  <head><meta charset="utf-8" /><title>Whooing</title></head>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Whooing</title>
+    <style>html, body { margin: 0; height: 100%; background: #fafafa; }</style>
+  </head>
   <body>
-    <p>Loading whooing.com…</p>
+    <script>
+      // Paint the bundled spinner before starting the network request.
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          location.replace(window.__WHOOING_START_URL__ || 'https://whooing.com');
+        });
+      });
+    </script>
   </body>
 </html>

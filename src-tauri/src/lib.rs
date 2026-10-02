@@ -3,6 +3,17 @@ use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
 
 const APP_ORIGIN_HOST: &str = "whooing.com";
+const LOADING_SCRIPT: &str = include_str!("../../dist/loading.js");
+
+fn is_external_url(url: &tauri::Url) -> bool {
+  matches!(url.scheme(), "http" | "https" | "mailto")
+}
+
+fn is_internal_url(url: &tauri::Url) -> bool {
+  url.as_str() == "about:blank"
+    || (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
+    || (matches!(url.scheme(), "http" | "https") && url.host_str() == Some("tauri.localhost"))
+}
 
 // 원격 whooing.com 페이지에 주입되는 스크립트. window.open()과 target="_blank" 링크를
 // 앱 내부에서 처리하지 않고 open_external 커맨드를 통해 시스템 기본 브라우저로 넘긴다.
@@ -10,7 +21,11 @@ const EXTERNAL_LINK_SCRIPT: &str = r#"
 (function () {
   function openExternal(url) {
     if (!url) return;
-    window.__TAURI__.core.invoke('open_external', { url: url });
+    try {
+      var resolved = new URL(url, window.location.href);
+      if (!['http:', 'https:', 'mailto:'].includes(resolved.protocol)) return;
+      window.__TAURI__.core.invoke('open_external', { url: resolved.href }).catch(console.error);
+    } catch (_) {}
   }
   var nativeOpen = window.open;
   window.open = function (url) {
@@ -57,6 +72,16 @@ fn handle_deep_link_url(app: &tauri::AppHandle, url: &tauri::Url) {
   let Some(window) = app.get_webview_window("main") else {
     return;
   };
+  if let Some(target) = deep_link_target(url) {
+    let _ = window.navigate(target);
+  }
+  let _ = window.set_focus();
+}
+
+fn deep_link_target(url: &tauri::Url) -> Option<tauri::Url> {
+  if url.scheme() != "whooing" {
+    return None;
+  }
   // whooing://auth/oauth_deeplink/... 형태는 "auth"가 path가 아니라 host로 파싱되므로
   // (예: whooing://auth/... -> host="auth", path="/..."), host를 다시 path 앞에 붙여야
   // 원래 경로(/auth/oauth_deeplink/...)가 복원된다.
@@ -70,10 +95,7 @@ fn handle_deep_link_url(app: &tauri::AppHandle, url: &tauri::Url) {
     target.push('?');
     target.push_str(query);
   }
-  if let Ok(parsed) = target.parse() {
-    let _ = window.navigate(parsed);
-  }
-  let _ = window.set_focus();
+  target.parse().ok()
 }
 
 #[tauri::command]
@@ -94,9 +116,13 @@ fn notify_new_message(window: tauri::WebviewWindow) -> Result<(), String> {
 
 #[tauri::command]
 fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
+  let parsed = tauri::Url::parse(&url).map_err(|e| e.to_string())?;
+  if !is_external_url(&parsed) {
+    return Err("Unsupported external URL scheme".into());
+  }
   app
     .opener()
-    .open_url(url, None::<&str>)
+    .open_url(parsed.as_str(), None::<&str>)
     .map_err(|e| e.to_string())
 }
 
@@ -134,20 +160,14 @@ pub fn run() {
         )?;
       }
 
-      // 개발 모드 Linux/Windows에서는 커스텀 스킴이 자동 등록 안 되므로 수동 등록.
-      // macOS는 번들 Info.plist(tauri.conf.json plugins.deep-link 설정)로만 등록 가능.
-      #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
-      app.deep_link().register_all()?;
-
-      // 앱이 딥링크로 "새로" 실행된 경우(콜드 스타트) — 이미 떠 있는 인스턴스에
-      // 붙는 케이스는 single-instance 플러그인이 on_open_url로 넘겨주지만,
-      // 최초 실행 시의 URL은 get_current()로 직접 확인해야 한다.
-      let app_handle_for_current = app.handle().clone();
-      if let Ok(Some(urls)) = app.deep_link().get_current() {
-        for url in urls {
-          handle_deep_link_url(&app_handle_for_current, &url);
-        }
-      }
+      // 콜드 스타트 딥링크는 윈도우가 생성되기 전에 초기 목적지로 저장한다.
+      let start_url = app
+        .deep_link()
+        .get_current()
+        .ok()
+        .flatten()
+        .and_then(|urls| urls.iter().find_map(deep_link_target))
+        .unwrap_or_else(|| format!("https://{APP_ORIGIN_HOST}").parse().unwrap());
 
       let deep_link_app_handle = app.handle().clone();
       app.deep_link().on_open_url(move |event| {
@@ -168,29 +188,116 @@ pub fn run() {
       // whooing.com(및 서브도메인) 외 도메인으로의 네비게이션은 임베드 웹뷰 안에서
       // 처리하지 않고 시스템 기본 브라우저로 넘긴다(구글 로그인 등 외부 OAuth 포함).
       let navigation_app_handle = app.handle().clone();
-      WebviewWindowBuilder::new(
-        app,
-        "main",
-        WebviewUrl::External(format!("https://{APP_ORIGIN_HOST}").parse().unwrap()),
-      )
-      .title("Whooing")
-      .inner_size(1280.0, 800.0)
-      .min_inner_size(960.0, 600.0)
-      .resizable(true)
-      .initialization_script(desktop_info_script)
-      .initialization_script(EXTERNAL_LINK_SCRIPT)
-      .initialization_script(RELOAD_SHORTCUT_SCRIPT)
-      .on_navigation(move |url| match url.host_str() {
-        Some(host) if is_app_origin(host) => true,
-        _ => {
-          let _ = navigation_app_handle.opener().open_url(url.as_str(), None::<&str>);
+      WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+        .title(app.config().product_name.as_deref().unwrap_or("Whooing"))
+        .inner_size(1280.0, 800.0)
+        .min_inner_size(960.0, 600.0)
+        .resizable(true)
+        .initialization_script(format!(
+          "window.__WHOOING_START_URL__ = {};",
+          serde_json::to_string(start_url.as_str())?
+        ))
+        .initialization_script(LOADING_SCRIPT)
+        .initialization_script(desktop_info_script)
+        .initialization_script(EXTERNAL_LINK_SCRIPT)
+        .initialization_script(RELOAD_SHORTCUT_SCRIPT)
+        .on_navigation(move |url| {
+          if is_internal_url(url) {
+            return true;
+          }
+          if matches!(url.scheme(), "http" | "https") && url.host_str().is_some_and(is_app_origin) {
+            return true;
+          }
+          if is_external_url(url) {
+            let _ = navigation_app_handle
+              .opener()
+              .open_url(url.as_str(), None::<&str>);
+          }
           false
-        }
-      })
-      .build()?;
+        })
+        .build()?;
+
+      // 스킴 등록의 외부 프로세스 실행이 첫 화면 표시를 막지 않게 한다.
+      // Linux 로컬 빌드는 설치된 앱의 OAuth 핸들러를 덮어쓰지 않는다.
+      #[cfg(any(
+        all(target_os = "linux", not(debug_assertions)),
+        all(debug_assertions, windows)
+      ))]
+      {
+        let registration_app = app.handle().clone();
+        std::thread::spawn(move || {
+          if let Err(error) = registration_app.deep_link().register_all() {
+            log::warn!("Deep-link registration failed: {error}");
+          }
+        });
+      }
 
       Ok(())
     })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn internal_browser_pages_are_never_external_links() {
+    for url in [
+      "about:blank",
+      "about:config",
+      "javascript:alert(1)",
+      "data:text/html,test",
+      "file:///tmp/test",
+    ] {
+      assert!(!is_external_url(&url.parse().unwrap()), "{url}");
+    }
+    for url in [
+      "https://example.com",
+      "http://example.com",
+      "mailto:test@example.com",
+    ] {
+      assert!(is_external_url(&url.parse().unwrap()), "{url}");
+    }
+  }
+
+  #[test]
+  fn local_loading_page_and_blank_webview_are_internal() {
+    for url in [
+      "about:blank",
+      "tauri://localhost/index.html",
+      "http://tauri.localhost/index.html",
+      "https://tauri.localhost/index.html",
+    ] {
+      assert!(is_internal_url(&url.parse().unwrap()), "{url}");
+    }
+    for url in [
+      "about:config",
+      "https://localhost",
+      "https://tauri.localhost.example.com",
+    ] {
+      assert!(!is_internal_url(&url.parse().unwrap()), "{url}");
+    }
+  }
+
+  #[test]
+  fn app_domain_matching_requires_a_domain_boundary() {
+    assert!(is_app_origin("whooing.com"));
+    assert!(is_app_origin("static.whooing.com"));
+    assert!(!is_app_origin("notwhooing.com"));
+    assert!(!is_app_origin("whooing.com.example.com"));
+  }
+
+  #[test]
+  fn cold_start_oauth_destination_preserves_path_and_query() {
+    let url = "whooing://auth/oauth_deeplink/google?code=test&state=state"
+      .parse()
+      .unwrap();
+    assert_eq!(
+      deep_link_target(&url).unwrap().as_str(),
+      "https://whooing.com/auth/oauth_deeplink/google?code=test&state=state"
+    );
+    assert!(deep_link_target(&"https://example.com".parse().unwrap()).is_none());
+  }
 }
