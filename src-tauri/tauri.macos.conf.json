@@ -1,0 +1,13 @@
+{
+  "bundle": {
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE2QzNBNTVDNjQ2RDg5MzQKUldRMGlXMWtYS1hERnNmbUpoWFdQQzAwRzNqRTNFcEtJM21iNnJLU2RyQ25YZjEwZFMvdEtqWDUK",
+      "endpoints": [
+        "https://github.com/zidell/whooing-desktop/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

@@ -126,6 +126,79 @@ fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+// macOS 전용 자동 업데이트. 윈도우는 MS Store가, 리눅스 deb/rpm은 패키지 관리자가 맡고
+// Tauri 업데이터는 그 형식을 지원하지 않으므로 맥 빌드에만 넣는다.
+// 시작 직후와 이후 주기적으로 latest.json을 확인해 새 버전을 백그라운드로 받아 설치하고,
+// 설치가 끝나면 재시작 여부를 묻는다. "나중에"를 고르면 이미 교체된 번들이 다음 실행 때 뜬다.
+#[cfg(target_os = "macos")]
+mod auto_update {
+  use std::time::Duration;
+  use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+  use tauri_plugin_updater::UpdaterExt;
+
+  const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+  const STARTUP_DELAY: Duration = Duration::from_secs(10);
+
+  pub fn start(app: tauri::AppHandle) {
+    std::thread::spawn(move || {
+      std::thread::sleep(STARTUP_DELAY);
+      loop {
+        match tauri::async_runtime::block_on(install_if_available(&app)) {
+          Ok(Some(version)) => {
+            // 설치가 끝나면 실행 중인 버전은 그대로라 다시 확인하면 같은 업데이트를 또 받는다.
+            // 한 번 설치했으면 루프를 끝낸다.
+            ask_restart(&app, &version);
+            return;
+          }
+          Ok(None) => {}
+          Err(error) => log::warn!("Auto update failed: {error}"),
+        }
+        std::thread::sleep(CHECK_INTERVAL);
+      }
+    });
+  }
+
+  async fn install_if_available(
+    app: &tauri::AppHandle,
+  ) -> Result<Option<String>, tauri_plugin_updater::Error> {
+    let Some(update) = app.updater()?.check().await? else {
+      return Ok(None);
+    };
+    let version = update.version.clone();
+    update.download_and_install(|_, _| {}, || {}).await?;
+    Ok(Some(version))
+  }
+
+  fn ask_restart(app: &tauri::AppHandle, version: &str) {
+    let korean = sys_locale::get_locale().is_some_and(|locale| locale.starts_with("ko"));
+    let (title, message, restart, later) = if korean {
+      (
+        "업데이트 설치됨".to_string(),
+        format!("후잉 {version} 버전을 설치했어요. 지금 다시 시작할까요?"),
+        "다시 시작".to_string(),
+        "나중에".to_string(),
+      )
+    } else {
+      (
+        "Update installed".to_string(),
+        format!("Whooing {version} has been installed. Restart now?"),
+        "Restart".to_string(),
+        "Later".to_string(),
+      )
+    };
+    let confirmed = app
+      .dialog()
+      .message(message)
+      .title(title)
+      .kind(MessageDialogKind::Info)
+      .buttons(MessageDialogButtons::OkCancelCustom(restart, later))
+      .blocking_show();
+    if confirmed {
+      app.restart();
+    }
+  }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   let mut builder = tauri::Builder::default();
@@ -141,6 +214,13 @@ pub fn run() {
         let _ = window.set_focus();
       }
     }));
+  }
+
+  #[cfg(target_os = "macos")]
+  {
+    builder = builder
+      .plugin(tauri_plugin_updater::Builder::new().build())
+      .plugin(tauri_plugin_dialog::init());
   }
 
   builder
@@ -231,6 +311,9 @@ pub fn run() {
           }
         });
       }
+
+      #[cfg(all(target_os = "macos", not(debug_assertions)))]
+      auto_update::start(app.handle().clone());
 
       Ok(())
     })

@@ -100,10 +100,15 @@ jobs:
             echo "APPLE_TEAM_ID=$APPLE_TEAM_ID" >> "$GITHUB_ENV"
           fi
 
+      # 맥 자동 업데이트용 서명 키. tauri.macos.conf.json의 createUpdaterArtifacts로 맥 빌드만
+      # .app.tar.gz + .sig를 만들고, tauri-action이 그걸로 latest.json을 릴리즈에 올린다.
+      # 키를 잃으면 이미 설치된 앱이 더 이상 업데이트를 못 받는다(백업은 1Password).
       - name: build and release
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           # macOS만 universal-apple-darwin(Apple Silicon + Intel 통합 바이너리)로 빌드
           args: ${{ matrix.platform == 'macos-latest' && '--target universal-apple-darwin' || '' }}
@@ -125,6 +130,25 @@ jobs:
           dmg=$(find src-tauri/target -path "*/bundle/dmg/*.dmg" | head -n1)
           cp "$dmg" "Whooing_macOS_universal.dmg"
           gh release upload "${{ inputs.tag || github.ref_name }}" "Whooing_macOS_universal.dmg" --clobber
+
+      # 업데이터 플러그인은 latest.json에서 "darwin-aarch64"/"darwin-x86_64" 키를 찾는다.
+      # universal 빌드 하나로 두 아키텍처를 모두 덮으므로, 어느 키든 빠져 있으면 있는 쪽을 복사해 채운다.
+      - name: ensure latest.json covers both macOS architectures
+        if: matrix.platform == 'macos-latest'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${{ inputs.tag || github.ref_name }}"
+          gh release download "$tag" --pattern latest.json --clobber
+          src=$(jq -r '.platforms | to_entries | map(select(.key | startswith("darwin"))) | .[0].key // empty' latest.json)
+          if [ -z "$src" ]; then echo "latest.json has no darwin entry" >&2; exit 1; fi
+          jq --arg src "$src" '.platforms["darwin-aarch64"] //= .platforms[$src] | .platforms["darwin-x86_64"] //= .platforms[$src]' latest.json > latest.fixed.json
+          if ! cmp -s latest.json latest.fixed.json; then
+            mv latest.fixed.json latest.json
+            gh release upload "$tag" latest.json --clobber
+          fi
+          jq '.platforms | keys' latest.json
 
       - name: upload version-less stable-name copies (Windows)
         if: matrix.platform == 'windows-latest'
