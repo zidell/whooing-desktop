@@ -32,6 +32,12 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    },
+    "macOS": {
+      "entitlements": "./Entitlements.plist",
+      "files": {
+        "embedded.provisionprofile": "./embedded.provisionprofile"
+      }
     }
   }
 }
