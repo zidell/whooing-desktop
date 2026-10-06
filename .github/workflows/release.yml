@@ -219,6 +219,14 @@ jobs:
                 <uap:VisualElements DisplayName="후잉가계부" Description="Whooing (whooing.com) desktop app"
                   Square150x150Logo="Square150x150Logo.png" Square44x44Logo="Square44x44Logo.png"
                   BackgroundColor="#464646" />
+                <!-- whooing:// 딥링크(SNS 로그인 핸드오프). 스토어판은 런타임 register_all을 안 하므로 여기서 등록해야 한다 -->
+                <Extensions>
+                  <uap:Extension Category="windows.protocol">
+                    <uap:Protocol Name="whooing">
+                      <uap:DisplayName>후잉가계부</uap:DisplayName>
+                    </uap:Protocol>
+                  </uap:Extension>
+                </Extensions>
               </Application>
             </Applications>
           </Package>
