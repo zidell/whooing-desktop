@@ -250,6 +250,14 @@ jobs:
 
             $manifest = $manifestTemplate -replace "__MSIX_VERSION__", $env:MSIX_VERSION -replace "__ARCH__", $arch
             Set-Content -Path "$payload\AppxManifest.xml" -Value $manifest -Encoding utf8
+            # 이 매니페스트는 Tauri 번들러를 우회해서 deep-link 스킴이 자동 등록되지 않는다.
+            # whooing:// 가 빠지면 SNS 로그인 뒤 앱으로 못 돌아오므로 빌드를 막는다
+            $packed = [xml](Get-Content "$payload\AppxManifest.xml" -Raw)
+            $ns = New-Object System.Xml.XmlNamespaceManager($packed.NameTable)
+            $ns.AddNamespace("uap", "http://schemas.microsoft.com/appx/manifest/uap/windows10")
+            if (-not $packed.SelectSingleNode("//uap:Extension[@Category='windows.protocol']/uap:Protocol[@Name='whooing']", $ns)) {
+              throw "AppxManifest.xml for $arch is missing the whooing:// protocol registration"
+            }
 
             $msixName = "Whooing_Windows_$arch.msix"
             & $env:MAKEAPPX_PATH pack /d $payload /p $msixName /o
