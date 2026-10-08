@@ -33,3 +33,5 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 sys-locale = "0.3"
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSWindow", "NSGraphics"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "WKWebView"] }
