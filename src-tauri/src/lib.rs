@@ -13,6 +13,13 @@ fn is_internal_url(url: &tauri::Url) -> bool {
   url.as_str() == "about:blank"
     || (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
     || (matches!(url.scheme(), "http" | "https") && url.host_str() == Some("tauri.localhost"))
+    || is_dev_server_url(url)
+}
+
+// `tauri dev`는 devUrl이 없으면 dist를 내장 개발 서버(http://127.0.0.1:<포트>)로 띄운다.
+// 릴리즈 빌드에는 없는 주소라 개발 빌드에서만 내부로 본다.
+fn is_dev_server_url(url: &tauri::Url) -> bool {
+  cfg!(debug_assertions) && url.scheme() == "http" && url.host_str() == Some("127.0.0.1")
 }
 
 // 원격 whooing.com 페이지에 주입되는 스크립트. window.open()과 target="_blank" 링크를
@@ -431,7 +438,14 @@ pub fn run() {
   }
 
   builder
-    .plugin(tauri_plugin_opener::init())
+    // 플러그인 기본값은 target="_blank" 링크 클릭을 가로채 plugin:opener|open_url을 부르는데,
+    // 원격 whooing.com에는 opener 권한을 주지 않아 호출이 거부되고 클릭만 막힌다.
+    // 새 창 요청은 macOS는 tabs 모듈, 다른 OS는 EXTERNAL_LINK_SCRIPT가 처리한다.
+    .plugin(
+      tauri_plugin_opener::Builder::new()
+        .open_js_links_on_click(false)
+        .build(),
+    )
     .plugin(tauri_plugin_deep_link::init())
     .invoke_handler(tauri::generate_handler![
       set_notification_badge,
