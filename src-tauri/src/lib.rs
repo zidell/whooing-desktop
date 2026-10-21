@@ -282,7 +282,7 @@ mod tabs {
     let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
       .title(app.config().product_name.as_deref().unwrap_or("Whooing"))
       .inner_size(1280.0, 800.0)
-      .min_inner_size(960.0, 600.0)
+      .min_inner_size(380.0, 600.0)
       .resizable(true)
       .visible(false)
       .tabbing_identifier(TABBING_IDENTIFIER)
@@ -486,7 +486,7 @@ pub fn run() {
       let mut main_window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
         .title(app.config().product_name.as_deref().unwrap_or("Whooing"))
         .inner_size(1280.0, 800.0)
-        .min_inner_size(960.0, 600.0)
+        .min_inner_size(380.0, 600.0)
         .resizable(true)
         .initialization_script(format!(
           "window.__WHOOING_START_URL__ = {};",
