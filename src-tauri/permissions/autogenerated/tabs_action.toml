@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-tabs-action"
+description = "Enables the tabs_action command without any pre-configured scope."
+commands.allow = ["tabs_action"]
+
+[[permission]]
+identifier = "deny-tabs-action"
+description = "Denies the tabs_action command without any pre-configured scope."
+commands.deny = ["tabs_action"]

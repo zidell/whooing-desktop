@@ -1,0 +1,7 @@
+{
+  "identifier": "tab-shell",
+  "description": "Only the bundled tab bar can manage desktop tabs",
+  "platforms": ["windows", "linux", "macOS"],
+  "webviews": ["main"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "allow-tabs-snapshot", "allow-tabs-action"]
+}

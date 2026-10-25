@@ -1,5 +1,5 @@
-// Prevents additional console window on Windows in release, DO NOT REMOVE!!
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// The locally built Windows app is a GUI too; debug logs are written by the log plugin.
+#![cfg_attr(windows, windows_subsystem = "windows")]
 
 fn main() {
   app_lib::run();

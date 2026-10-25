@@ -4859,8 +4859,8 @@ dependencies = [
 name = "whooing-desktop"
 version = "0.1.1"
 dependencies = [
+ "gtk",
  "log",
- "objc2-app-kit",
  "objc2-web-kit",
  "serde",
  "serde_json",
@@ -4873,6 +4873,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "windows-registry",
 ]
 
 [[package]]

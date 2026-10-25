@@ -1,0 +1,8 @@
+{
+  "plugins": {
+    "whooing": {
+      "localPreview": true,
+      "startUrl": "https://q22.whooing.com"
+    }
+  }
+}

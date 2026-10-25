@@ -26,6 +26,15 @@ tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-deep-link = "2"
 
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.5"
+
+[target.'cfg(any(windows, target_os = "linux", target_os = "macos"))'.dependencies]
+tauri = { version = "2.11.3", features = ["unstable"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { version = "0.18", features = ["v3_24"] }
+
 [target."cfg(any(target_os = \"macos\", windows, target_os = \"linux\"))".dependencies]
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
@@ -33,5 +42,4 @@ tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 sys-locale = "0.3"
 tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSResponder", "NSWindow", "NSGraphics"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "WKWebView"] }

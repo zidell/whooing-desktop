@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>멀티탭 링크 검증</title>
+<style>body{font:18px system-ui;padding:32px} a,button{display:block;margin:18px 0;font:inherit}pre{white-space:pre-wrap}</style>
+<h1>멀티탭 링크 검증</h1>
+<a href="https://example.com" target="_blank">일반 링크를 새 탭으로 열기</a>
+<button onclick="window.open('https://example.org')">window.open으로 새 탭 열기</button>
+<a href="https://example.net">현재 외부 탭에서 이동</a>
+<a href="https://example.com" target="_blank">우클릭 새 창 열기 검증</a>
+<button onclick="checkPermissions()">외부 페이지 앱 권한 차단 확인</button>
+<pre id="result"></pre>
+<script>
+async function checkPermissions() {
+  const result = document.getElementById('result');
+  result.textContent = '';
+  for (const [command, args] of [
+    ['tabs_snapshot', {}],
+    ['tabs_action', {action:'open', url:'https://example.com'}],
+    ['set_notification_badge', {count:0}],
+    ['notify_new_message', {}],
+    ['open_external', {url:'https://example.com'}],
+  ]) {
+    try {
+      await window.__TAURI__.core.invoke(command, args);
+      result.textContent += 'FAIL (허용됨): ' + command + '\n';
+    } catch (_) { result.textContent += 'PASS (차단됨): ' + command + '\n'; }
+  }
+}
+</script>
+</html>

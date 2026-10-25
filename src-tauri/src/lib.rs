@@ -1,9 +1,21 @@
-use tauri::{Manager, UserAttentionType, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, UserAttentionType};
+#[cfg(not(desktop))]
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_opener::OpenerExt;
 
 const APP_ORIGIN_HOST: &str = "whooing.com";
 const LOADING_SCRIPT: &str = include_str!("../../dist/loading.js");
+
+fn tab_bar_visible(tab_count: usize) -> bool {
+  tab_count > 1
+}
+
+#[cfg(desktop)]
+mod desktop_tabs;
+
+#[cfg(all(windows, debug_assertions))]
+mod preview;
 
 fn is_external_url(url: &tauri::Url) -> bool {
   matches!(url.scheme(), "http" | "https" | "mailto")
@@ -24,8 +36,8 @@ fn is_dev_server_url(url: &tauri::Url) -> bool {
 
 // 원격 whooing.com 페이지에 주입되는 스크립트. window.open()과 target="_blank" 링크를
 // 앱 내부에서 처리하지 않고 open_external 커맨드를 통해 시스템 기본 브라우저로 넘긴다.
-// macOS는 이 스크립트 대신 tabs 모듈이 웹뷰의 새 창 요청을 받아 앱 탭으로 연다.
-#[cfg(not(target_os = "macos"))]
+// Desktop platforms handle new-window requests natively in desktop_tabs.
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 const EXTERNAL_LINK_SCRIPT: &str = r#"
 (function () {
   function openExternal(url) {
@@ -58,6 +70,7 @@ const EXTERNAL_LINK_SCRIPT: &str = r#"
 // 임베드 웹뷰(WKWebView/WebView2/WebKitGTK)도 브라우저 크롬 없이는 Ctrl+R/Cmd+R을
 // 자체적으로 바인딩하지 않는다(Windows WebView2도 실측 결과 동작 안 함). 3개 OS 공통으로
 // 새로고침을 보장하기 위해 직접 키 리스너를 주입한다.
+#[cfg(not(desktop))]
 const RELOAD_SHORTCUT_SCRIPT: &str = r#"
 (function () {
   document.addEventListener('keydown', function (e) {
@@ -75,10 +88,31 @@ fn is_app_origin(host: &str) -> bool {
   host == APP_ORIGIN_HOST || host.ends_with(&format!(".{APP_ORIGIN_HOST}"))
 }
 
+// A preview build can target a Whooing development server without changing the
+// production default. OAuth deeplinks must return to that same origin.
+fn configured_start_url(config: &tauri::Config) -> Result<tauri::Url, String> {
+  let address = config
+    .plugins
+    .0
+    .get("whooing")
+    .and_then(|settings| settings.get("startUrl"))
+    .and_then(|value| value.as_str())
+    .unwrap_or("https://whooing.com");
+  let url: tauri::Url = address.parse().map_err(|_| "Invalid Whooing start URL")?;
+  if url.scheme() != "https"
+    || !url.host_str().is_some_and(is_app_origin)
+    || !url.username().is_empty()
+    || url.password().is_some()
+    || url.port().is_some()
+  {
+    return Err("Whooing start URL must use HTTPS on a Whooing domain".into());
+  }
+  Ok(url)
+}
+
 // 앱 탭이 아니라 기본 브라우저에서 진행해야 하는 주소. SNS 로그인은 제공자가 임베드 웹뷰를
 // 막고(구글 disallowed_useragent 등) 딥링크로 앱에 돌아오는 구조이고, 결제는 웹이
 // gumoisland.com의 export_to 발판으로 "외부 브라우저로 보내라"는 뜻을 표시해 넘긴다.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 fn must_open_in_browser(url: &tauri::Url) -> bool {
   if !matches!(url.scheme(), "http" | "https") {
     return true;
@@ -97,20 +131,43 @@ fn must_open_in_browser(url: &tauri::Url) -> bool {
   }
 }
 
+#[derive(Debug, PartialEq)]
+enum LinkAction {
+  Stay,
+  Tab,
+  Browser,
+  Block,
+}
+
+// All native navigation/new-window handlers use this policy. Explicit open_external
+// calls remain a browser handoff requested by the website (OAuth/payment).
+fn link_action(url: &tauri::Url, new_window: bool, app_page: bool) -> LinkAction {
+  if is_external_url(url) {
+    if must_open_in_browser(url) {
+      return LinkAction::Browser;
+    }
+    if new_window || (app_page && !url.host_str().is_some_and(is_app_origin)) {
+      return LinkAction::Tab;
+    }
+    return LinkAction::Stay;
+  }
+  if !new_window && (is_internal_url(url) || (!app_page && matches!(url.scheme(), "data" | "blob")))
+  {
+    LinkAction::Stay
+  } else {
+    LinkAction::Block
+  }
+}
+
 fn open_in_browser(app: &tauri::AppHandle, url: &tauri::Url) {
   if is_external_url(url) {
     let _ = app.opener().open_url(url.as_str(), None::<&str>);
   }
 }
 
-// 웹뷰 밖으로 나가는 링크. macOS는 SNS 로그인·결제만 기본 브라우저로 보내고 나머지는
-// 링크를 연 창에 붙는 네이티브 탭으로 연다. 다른 OS는 전부 기본 브라우저로 보낸다.
+// Desktop platforms share the same tab policy and child-webview UI.
+#[cfg(not(desktop))]
 fn open_outside_webview(app: &tauri::AppHandle, opener_label: &str, url: &tauri::Url) {
-  #[cfg(target_os = "macos")]
-  if !must_open_in_browser(url) {
-    tabs::open(app, opener_label, url.clone());
-    return;
-  }
   let _ = opener_label;
   open_in_browser(app, url);
 }
@@ -129,6 +186,7 @@ fn desktop_info_script(app: &tauri::AppHandle) -> String {
 }
 
 // 메인 창이 닫혀도 탭이 남아 있으면 그 탭이 딥링크·재실행 포커스를 받는다.
+#[cfg(not(desktop))]
 fn primary_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
   app
     .get_webview_window("main")
@@ -138,16 +196,29 @@ fn primary_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
 // whooing://<path>?<query> 형태의 딥링크(예: OAuth 콜백 핸드오프)를
 // https://whooing.com/<path>?<query> 로 변환해 메인 윈도우를 이동시킨다.
 fn handle_deep_link_url(app: &tauri::AppHandle, url: &tauri::Url) {
-  let Some(window) = primary_window(app) else {
+  let Ok(home) = configured_start_url(app.config()) else {
     return;
   };
-  if let Some(target) = deep_link_target(url) {
-    let _ = window.navigate(target);
+  #[cfg(desktop)]
+  {
+    if let Some(target) = deep_link_target(url, &home) {
+      desktop_tabs::deep_link(app, target);
+    }
+    return;
   }
-  let _ = window.set_focus();
+  #[cfg(not(desktop))]
+  {
+    let Some(window) = primary_window(app) else {
+      return;
+    };
+    if let Some(target) = deep_link_target(url, &home) {
+      let _ = window.navigate(target);
+    }
+    let _ = window.set_focus();
+  }
 }
 
-fn deep_link_target(url: &tauri::Url) -> Option<tauri::Url> {
+fn deep_link_target(url: &tauri::Url, home: &tauri::Url) -> Option<tauri::Url> {
   if url.scheme() != "whooing" {
     return None;
   }
@@ -155,10 +226,11 @@ fn deep_link_target(url: &tauri::Url) -> Option<tauri::Url> {
   // (예: whooing://auth/... -> host="auth", path="/..."), host를 다시 path 앞에 붙여야
   // 원래 경로(/auth/oauth_deeplink/...)가 복원된다.
   let host = url.host_str().unwrap_or_default();
+  let origin = home.origin().ascii_serialization();
   let mut target = if host.is_empty() {
-    format!("https://{APP_ORIGIN_HOST}{}", url.path())
+    format!("{origin}{}", url.path())
   } else {
-    format!("https://{APP_ORIGIN_HOST}/{host}{}", url.path())
+    format!("{origin}/{host}{}", url.path())
   };
   if let Some(query) = url.query() {
     target.push('?');
@@ -168,7 +240,7 @@ fn deep_link_target(url: &tauri::Url) -> Option<tauri::Url> {
 }
 
 #[tauri::command]
-fn set_notification_badge(window: tauri::WebviewWindow, count: i64) -> Result<(), String> {
+fn set_notification_badge(window: tauri::Window, count: i64) -> Result<(), String> {
   // macOS(독 숫자 뱃지) / Linux(libunity 지원 환경). Windows는 Tauri에서 숫자 뱃지 미지원.
   window
     .set_badge_count(if count > 0 { Some(count) } else { None })
@@ -176,7 +248,7 @@ fn set_notification_badge(window: tauri::WebviewWindow, count: i64) -> Result<()
 }
 
 #[tauri::command]
-fn notify_new_message(window: tauri::WebviewWindow) -> Result<(), String> {
+fn notify_new_message(window: tauri::Window) -> Result<(), String> {
   // macOS: 독 아이콘 한 번 튕김 / Windows: 포커스 잡을 때까지 작업표시줄 깜빡임.
   window
     .request_user_attention(Some(UserAttentionType::Informational))
@@ -193,151 +265,6 @@ fn open_external(app: tauri::AppHandle, url: String) -> Result<(), String> {
     .opener()
     .open_url(parsed.as_str(), None::<&str>)
     .map_err(|e| e.to_string())
-}
-
-// macOS 전용 앱 내 탭. 링크를 새 WebviewWindow로 만들어 링크를 연 창의 네이티브 탭 그룹에
-// 붙인다(NSWindow addTabbedWindow). 탭바·⌘W·⌃Tab·탭 분리는 macOS가 처리한다.
-// 시스템 설정 "문서를 열 때 탭 선호"와 무관하게 항상 탭으로 붙이려고 직접 붙인다.
-#[cfg(target_os = "macos")]
-mod tabs {
-  use std::sync::atomic::{AtomicUsize, Ordering};
-
-  use objc2_app_kit::{NSWindow, NSWindowOrderingMode};
-  use objc2_web_kit::WKWebView;
-  use tauri::webview::NewWindowResponse;
-  use tauri::{AppHandle, Manager, Url, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
-
-  use super::{
-    desktop_info_script, is_app_origin, is_external_url, must_open_in_browser, open_in_browser,
-    open_outside_webview, LOADING_SCRIPT, RELOAD_SHORTCUT_SCRIPT,
-  };
-
-  pub const TABBING_IDENTIFIER: &str = "whooing";
-  static NEXT_TAB: AtomicUsize = AtomicUsize::new(1);
-
-  // 탭마다 방문 기록은 있지만 웹뷰에 뒤로·앞으로 단축키가 없어서 사파리와 같은 ⌘[ / ⌘]를 붙인다.
-  pub const HISTORY_SHORTCUT_SCRIPT: &str = r#"
-(function () {
-  document.addEventListener('keydown', function (e) {
-    if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-    if (e.key === '[') {
-      e.preventDefault();
-      history.back();
-    } else if (e.key === ']') {
-      e.preventDefault();
-      history.forward();
-    }
-  }, true);
-})();
-"#;
-
-  // 트랙패드 두 손가락 좌우 스와이프로 뒤로·앞으로(WKWebView 기본값은 꺼짐, Tauri는 옵션을 노출하지 않는다).
-  pub fn enable_swipe_navigation(window: &WebviewWindow) {
-    let _ = window.with_webview(|webview| {
-      // Safety: macOS에서 PlatformWebview::inner()는 이 창의 WKWebView다. with_webview는 메인 스레드에서 실행한다.
-      unsafe {
-        let view = &*webview.inner().cast::<WKWebView>();
-        view.setAllowsBackForwardNavigationGestures(true);
-      }
-    });
-  }
-
-  // 웹뷰의 새 창 요청(target="_blank", window.open). 앱이 직접 만든 탭은 opener 관계가 없어
-  // window.open()은 null을 받는다(옛 주입 스크립트와 같다).
-  pub fn on_new_window(app: &AppHandle, opener_label: &str, url: Url) -> NewWindowResponse<tauri::Wry> {
-    if matches!(url.scheme(), "http" | "https") {
-      open_outside_webview(app, opener_label, &url);
-    } else if is_external_url(&url) {
-      open_in_browser(app, &url);
-    }
-    NewWindowResponse::Deny
-  }
-
-  pub fn set_title_from_document(window: WebviewWindow, title: String) {
-    if !title.trim().is_empty() {
-      let _ = window.set_title(&title);
-    }
-  }
-
-  // 웹뷰 콜백(메인 스레드) 안에서 창을 만들지 않도록 비동기로 넘긴다.
-  pub fn open(app: &AppHandle, opener_label: &str, url: Url) {
-    let app = app.clone();
-    let opener_label = opener_label.to_string();
-    tauri::async_runtime::spawn(async move {
-      if let Err(error) = create(&app, &opener_label, url) {
-        log::warn!("Opening a tab failed: {error}");
-      }
-    });
-  }
-
-  fn create(app: &AppHandle, opener_label: &str, url: Url) -> tauri::Result<()> {
-    let label = format!("tab-{}", NEXT_TAB.fetch_add(1, Ordering::Relaxed));
-    // whooing.com에서 시작한 탭은 메인 창처럼 앱 밖 주소를 다시 탭으로 넘기고,
-    // 외부 사이트 탭은 그 사이트 안의 이동을 그대로 둔다.
-    let app_page = url.host_str().is_some_and(is_app_origin);
-    let new_window_app = app.clone();
-    let new_window_label = label.clone();
-    let navigation_app = app.clone();
-    let navigation_label = label.clone();
-    let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(url))
-      .title(app.config().product_name.as_deref().unwrap_or("Whooing"))
-      .inner_size(1280.0, 800.0)
-      .min_inner_size(380.0, 600.0)
-      .resizable(true)
-      .visible(false)
-      .tabbing_identifier(TABBING_IDENTIFIER)
-      .initialization_script(LOADING_SCRIPT)
-      .initialization_script(desktop_info_script(app))
-      .initialization_script(RELOAD_SHORTCUT_SCRIPT)
-      .initialization_script(HISTORY_SHORTCUT_SCRIPT)
-      .on_document_title_changed(set_title_from_document)
-      .on_new_window(move |url, _features| on_new_window(&new_window_app, &new_window_label, url))
-      .on_navigation(move |url| {
-        if !matches!(url.scheme(), "http" | "https") {
-          // 외부 사이트의 about:blank·data:·blob: 프레임은 그대로 두고 mailto만 넘긴다.
-          if is_external_url(url) {
-            open_in_browser(&navigation_app, url);
-            return false;
-          }
-          return true;
-        }
-        if url.host_str().is_some_and(is_app_origin) {
-          return true;
-        }
-        if app_page {
-          open_outside_webview(&navigation_app, &navigation_label, url);
-          return false;
-        }
-        if must_open_in_browser(url) {
-          open_in_browser(&navigation_app, url);
-          return false;
-        }
-        true
-      })
-      .build()?;
-    enable_swipe_navigation(&window);
-
-    let opener = app.get_webview_window(opener_label);
-    app.run_on_main_thread(move || {
-      if let Some(opener) = opener {
-        attach(&opener, &window);
-      }
-      let _ = window.show();
-      let _ = window.set_focus();
-    })
-  }
-
-  fn attach(opener: &WebviewWindow, tab: &WebviewWindow) {
-    let (Ok(parent), Ok(child)) = (opener.ns_window(), tab.ns_window()) else {
-      return;
-    };
-    // Safety: 둘 다 살아 있는 Tauri 창의 NSWindow이고, run_on_main_thread 안에서만 부른다.
-    unsafe {
-      let parent = &*parent.cast::<NSWindow>();
-      let child = &*child.cast::<NSWindow>();
-      parent.addTabbedWindow_ordered(child, NSWindowOrderingMode::Above);
-    }
-  }
 }
 
 // macOS 전용 자동 업데이트. 윈도우는 MS Store가, 리눅스 deb/rpm은 패키지 관리자가 맡고
@@ -424,6 +351,12 @@ pub fn run() {
   #[cfg(desktop)]
   {
     builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+      #[cfg(desktop)]
+      if let Some(window) = app.get_window("main") {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+      }
+      #[cfg(not(desktop))]
       if let Some(window) = primary_window(app) {
         let _ = window.set_focus();
       }
@@ -440,7 +373,7 @@ pub fn run() {
   builder
     // 플러그인 기본값은 target="_blank" 링크 클릭을 가로채 plugin:opener|open_url을 부르는데,
     // 원격 whooing.com에는 opener 권한을 주지 않아 호출이 거부되고 클릭만 막힌다.
-    // 새 창 요청은 macOS는 tabs 모듈, 다른 OS는 EXTERNAL_LINK_SCRIPT가 처리한다.
+    // Desktop new-window requests use native callbacks on all three OSes.
     .plugin(
       tauri_plugin_opener::Builder::new()
         .open_js_links_on_click(false)
@@ -450,7 +383,11 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       set_notification_badge,
       notify_new_message,
-      open_external
+      open_external,
+      #[cfg(desktop)]
+      desktop_tabs::tabs_snapshot,
+      #[cfg(desktop)]
+      desktop_tabs::tabs_action
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {
@@ -462,13 +399,14 @@ pub fn run() {
       }
 
       // 콜드 스타트 딥링크는 윈도우가 생성되기 전에 초기 목적지로 저장한다.
+      let home = configured_start_url(app.config())?;
       let start_url = app
         .deep_link()
         .get_current()
         .ok()
         .flatten()
-        .and_then(|urls| urls.iter().find_map(deep_link_target))
-        .unwrap_or_else(|| format!("https://{APP_ORIGIN_HOST}").parse().unwrap());
+        .and_then(|urls| urls.iter().find_map(|url| deep_link_target(url, &home)))
+        .unwrap_or_else(|| home.clone());
 
       let deep_link_app_handle = app.handle().clone();
       app.deep_link().on_open_url(move |event| {
@@ -477,60 +415,54 @@ pub fn run() {
         }
       });
 
-      let desktop_info_script = desktop_info_script(app.handle());
+      #[cfg(desktop)]
+      desktop_tabs::setup(app, start_url, home)?;
 
-      // whooing.com(및 서브도메인) 외 도메인으로의 네비게이션은 임베드 웹뷰 안에서
-      // 처리하지 않는다. macOS는 앱 탭으로, 다른 OS는 시스템 기본 브라우저로 넘긴다.
-      // 구글 로그인 등 SNS 로그인과 결제는 어느 OS든 기본 브라우저로 간다.
-      let navigation_app_handle = app.handle().clone();
-      let mut main_window = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-        .title(app.config().product_name.as_deref().unwrap_or("Whooing"))
-        .inner_size(1280.0, 800.0)
-        .min_inner_size(380.0, 600.0)
-        .resizable(true)
-        .initialization_script(format!(
-          "window.__WHOOING_START_URL__ = {};",
-          serde_json::to_string(start_url.as_str())?
-        ))
-        .initialization_script(LOADING_SCRIPT)
-        .initialization_script(desktop_info_script)
-        .initialization_script(RELOAD_SHORTCUT_SCRIPT)
-        .on_navigation(move |url| {
-          if is_internal_url(url) {
-            return true;
-          }
-          if matches!(url.scheme(), "http" | "https") && url.host_str().is_some_and(is_app_origin) {
-            return true;
-          }
-          if is_external_url(url) {
-            open_outside_webview(&navigation_app_handle, "main", url);
-          }
-          false
-        });
-
-      // macOS는 새 창 요청을 웹뷰 네이티브 콜백으로 받아 탭으로 열고,
-      // 다른 OS는 주입 스크립트가 가로채 open_external로 기본 브라우저에 넘긴다.
-      #[cfg(target_os = "macos")]
+      #[cfg(not(desktop))]
       {
-        let new_window_app_handle = app.handle().clone();
-        main_window = main_window
-          .tabbing_identifier(tabs::TABBING_IDENTIFIER)
-          .initialization_script(tabs::HISTORY_SHORTCUT_SCRIPT)
-          .on_document_title_changed(tabs::set_title_from_document)
-          .on_new_window(move |url, _features| {
-            tabs::on_new_window(&new_window_app_handle, "main", url)
-          });
-      }
-      #[cfg(not(target_os = "macos"))]
-      {
-        main_window = main_window.initialization_script(EXTERNAL_LINK_SCRIPT);
-      }
+        let desktop_info_script = desktop_info_script(app.handle());
 
-      let main_window = main_window.build()?;
-      #[cfg(target_os = "macos")]
-      tabs::enable_swipe_navigation(&main_window);
-      #[cfg(not(target_os = "macos"))]
-      let _ = main_window;
+        // whooing.com(및 서브도메인) 외 도메인으로의 네비게이션은 임베드 웹뷰 안에서
+        // 처리하지 않는다. macOS는 앱 탭으로, 다른 OS는 시스템 기본 브라우저로 넘긴다.
+        // 구글 로그인 등 SNS 로그인과 결제는 어느 OS든 기본 브라우저로 간다.
+        let navigation_app_handle = app.handle().clone();
+        let mut main_window =
+          WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            .title(app.config().product_name.as_deref().unwrap_or("Whooing"))
+            .inner_size(1280.0, 800.0)
+            .min_inner_size(380.0, 600.0)
+            .resizable(true)
+            .initialization_script(format!(
+              "window.__WHOOING_START_URL__ = {};",
+              serde_json::to_string(start_url.as_str())?
+            ))
+            .initialization_script(LOADING_SCRIPT)
+            .initialization_script(desktop_info_script)
+            .initialization_script(RELOAD_SHORTCUT_SCRIPT)
+            .on_navigation(move |url| match link_action(url, false, true) {
+              LinkAction::Stay => true,
+              LinkAction::Tab => {
+                open_outside_webview(&navigation_app_handle, "main", url);
+                false
+              }
+              LinkAction::Browser => {
+                open_in_browser(&navigation_app_handle, url);
+                false
+              }
+              LinkAction::Block => false,
+            });
+
+        // macOS는 새 창 요청을 웹뷰 네이티브 콜백으로 받아 탭으로 열고,
+        // 다른 OS는 주입 스크립트가 가로채 open_external로 기본 브라우저에 넘긴다.
+        #[cfg(not(target_os = "macos"))]
+        {
+          main_window = main_window.initialization_script(EXTERNAL_LINK_SCRIPT);
+        }
+
+        let main_window = main_window.build()?;
+        #[cfg(not(target_os = "macos"))]
+        let _ = main_window;
+      }
 
       // 스킴 등록의 외부 프로세스 실행이 첫 화면 표시를 막지 않게 한다.
       // Linux 로컬 빌드는 설치된 앱의 OAuth 핸들러를 덮어쓰지 않는다.
@@ -543,6 +475,10 @@ pub fn run() {
         std::thread::spawn(move || {
           if let Err(error) = registration_app.deep_link().register_all() {
             log::warn!("Deep-link registration failed: {error}");
+          }
+          #[cfg(all(windows, debug_assertions))]
+          if let Err(error) = preview::register(&registration_app) {
+            log::warn!("Local preview registration failed: {error}");
           }
         });
       }
@@ -559,6 +495,14 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn tab_bar_is_visible_only_for_multiple_tabs() {
+    assert!(!tab_bar_visible(0));
+    assert!(!tab_bar_visible(1));
+    assert!(tab_bar_visible(2));
+    assert!(tab_bar_visible(usize::MAX));
+  }
 
   #[test]
   fn internal_browser_pages_are_never_external_links() {
@@ -632,14 +576,78 @@ mod tests {
   }
 
   #[test]
+  fn link_policy_is_consistent_for_navigation_and_popups() {
+    for address in [
+      "https://whooing.com/auth/oauth/google?go_to=todesktop",
+      "https://accounts.google.com/o/oauth2/v2/auth",
+      "https://appleid.apple.com/auth/authorize",
+      "https://nid.naver.com/oauth2.0/authorize",
+      "https://www.facebook.com/v18.0/dialog/oauth",
+      "https://gumoisland.com/redirect/export_to/go?url=test",
+      "mailto:test@example.com",
+    ] {
+      let url = address.parse().unwrap();
+      for new_window in [false, true] {
+        for app_page in [false, true] {
+          assert_eq!(
+            link_action(&url, new_window, app_page),
+            LinkAction::Browser,
+            "{address}"
+          );
+        }
+      }
+    }
+    let internal = "https://whooing.com/report".parse().unwrap();
+    let external = "https://example.com/report".parse().unwrap();
+    assert_eq!(link_action(&internal, false, true), LinkAction::Stay);
+    assert_eq!(link_action(&internal, true, true), LinkAction::Tab);
+    assert_eq!(link_action(&external, false, true), LinkAction::Tab);
+    assert_eq!(link_action(&external, false, false), LinkAction::Stay);
+    assert_eq!(link_action(&external, true, false), LinkAction::Tab);
+    for address in [
+      "file:///C:/test",
+      "javascript:alert(1)",
+      "whooing-tab://close",
+    ] {
+      assert_eq!(
+        link_action(&address.parse().unwrap(), true, false),
+        LinkAction::Block
+      );
+    }
+    // The OAuth callback must stay inside the app instead of bouncing back out.
+    assert_eq!(
+      link_action(
+        &"https://whooing.com/auth/oauth_deeplink/google?code=test"
+          .parse()
+          .unwrap(),
+        false,
+        true
+      ),
+      LinkAction::Stay
+    );
+  }
+
+  #[test]
   fn cold_start_oauth_destination_preserves_path_and_query() {
     let url = "whooing://auth/oauth_deeplink/google?code=test&state=state"
       .parse()
       .unwrap();
     assert_eq!(
-      deep_link_target(&url).unwrap().as_str(),
+      deep_link_target(&url, &"https://whooing.com".parse().unwrap())
+        .unwrap()
+        .as_str(),
       "https://whooing.com/auth/oauth_deeplink/google?code=test&state=state"
     );
-    assert!(deep_link_target(&"https://example.com".parse().unwrap()).is_none());
+    assert!(deep_link_target(
+      &"https://example.com".parse().unwrap(),
+      &"https://whooing.com".parse().unwrap()
+    )
+    .is_none());
+    assert_eq!(
+      deep_link_target(&url, &"https://q22.whooing.com".parse().unwrap())
+        .unwrap()
+        .as_str(),
+      "https://q22.whooing.com/auth/oauth_deeplink/google?code=test&state=state"
+    );
   }
 }

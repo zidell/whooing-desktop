@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; connect-src ipc: http://ipc.localhost">
+  <title>Whooing</title>
+  <link rel="stylesheet" href="tabs.css">
+  <script src="tab-keys.js" defer></script>
+  <script src="tabs.js" defer></script>
+</head>
+<body>
+  <header hidden>
+    <div class="tab-row">
+      <div id="tabs" role="tablist" aria-label="열린 탭"></div>
+      <button id="new" title="새 후잉 탭 (Ctrl+T)" aria-label="새 후잉 탭">+</button>
+      <p id="status" role="status">후잉을 불러오는 중…</p>
+    </div>
+  </header>
+</body>
+</html>
