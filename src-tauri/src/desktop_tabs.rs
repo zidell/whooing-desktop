@@ -256,17 +256,39 @@ fn select(app: &AppHandle, id: &str) -> tauri::Result<()> {
 }
 
 fn bounds(app: &AppHandle) -> tauri::Result<(LogicalPosition<f64>, LogicalSize<f64>)> {
-  let window = app.get_window("main").ok_or(tauri::Error::WindowNotFound)?;
-  let size = window
-    .inner_size()?
-    .to_logical::<f64>(window.scale_factor()?);
+  #[cfg(not(target_os = "macos"))]
+  let (top_inset, size) = {
+    let window = app.get_window("main").ok_or(tauri::Error::WindowNotFound)?;
+    let size = window
+      .inner_size()?
+      .to_logical::<f64>(window.scale_factor()?);
+    (0., size)
+  };
+  #[cfg(target_os = "macos")]
+  let (top_inset, size) = {
+    // macOS child views extend beneath the title bar. The local shell's HTML
+    // respects that safe area, so content must reserve it as well as the tabs.
+    let shell = app.get_webview("main").ok_or(tauri::Error::WindowNotFound)?;
+    let (sender, receiver) = mpsc::sync_channel(1);
+    shell.with_webview(move |platform| unsafe {
+      let view = &*platform.inner().cast::<objc2_web_kit::WKWebView>();
+      let parent = view.superview().unwrap();
+      let size = parent.bounds().size;
+      let top_inset = parent.safeAreaInsets().top;
+      let _ = sender.send((
+        top_inset,
+        LogicalSize::new(size.width, size.height - top_inset),
+      ));
+    })?;
+    receiver.recv().map_err(std::io::Error::other)?
+  };
   let chrome_height = if snapshot(app).tab_bar_visible {
     CHROME_HEIGHT
   } else {
     0.
   };
   Ok((
-    LogicalPosition::new(0., chrome_height),
+    LogicalPosition::new(0., top_inset + chrome_height),
     LogicalSize::new(size.width, (size.height - chrome_height).max(1.)),
   ))
 }

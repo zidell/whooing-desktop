@@ -28,6 +28,9 @@
     select.className = 'select';
     select.setAttribute('role', 'tab');
     select.onclick = () => action('select', { id });
+    const title = document.createElement('span');
+    title.className = 'title';
+    select.append(title);
     const close = document.createElement('button');
     close.className = 'close';
     close.textContent = '×';
@@ -94,6 +97,7 @@
     // Keep existing DOM nodes so asynchronous title updates do not cancel drags
     // or discard keyboard focus on the tab strip.
     const rows = new Map([...tabs.children].map(row => [row.dataset.id, row]));
+    let activeRow = null;
     for (const [index, tab] of state.tabs.entries()) {
       const row = rows.get(tab.id) || createRow(tab.id);
       rows.delete(tab.id);
@@ -102,14 +106,23 @@
       select.setAttribute('aria-selected', String(tab.id === state.active));
       select.setAttribute('aria-label', (index + 1) + ': ' + tab.title);
       select.tabIndex = tab.id === state.active ? 0 : -1;
-      select.textContent = tab.title;
+      const title = select.querySelector('.title');
+      if (title.textContent !== tab.title) title.textContent = tab.title;
       const digit = index < 8 ? index + 1 : index === state.tabs.length - 1 ? 9 : null;
       select.title = tab.title + (digit ? ' (' + (keys.mac ? 'Cmd' : 'Ctrl') + '+' + digit + ')' : '');
       row.querySelector('.close').setAttribute('aria-label', tab.title + ' 탭 닫기');
       if (tabs.children[index] !== row) tabs.insertBefore(row, tabs.children[index] || null);
-      if (activeChanged && tab.id === state.active) row.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+      if (tab.id === state.active) activeRow = row;
     }
     for (const row of rows.values()) row.remove();
+    // Scroll only the tab list, after its final layout. scrollIntoView can also
+    // scroll the shell document and move every tab when WebKit clips a title.
+    if (activeChanged && activeRow) {
+      const list = tabs.getBoundingClientRect();
+      const row = activeRow.getBoundingClientRect();
+      if (row.left < list.left) tabs.scrollLeft += row.left - list.left;
+      else if (row.right > list.right) tabs.scrollLeft += row.right - list.right;
+    }
     status.textContent = state.tabs.length ? '' : '후잉을 불러오는 중…';
   }
   tabs.ondragover = event => { if (draggedId) event.preventDefault(); };
