@@ -8,20 +8,20 @@
   var overlay = document.createElement('div');
   overlay.id = 'whooing-desktop-loading';
   // Keep the site's styles from affecting the loading indicator.
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#fafafa;';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#252525;color-scheme:dark;';
   var shadow = overlay.attachShadow({ mode: 'closed' });
   shadow.innerHTML = `
     <style>
-      :host { color: #454545; font-family: system-ui, sans-serif; }
+      :host { color: #e0e0e0; font-family: system-ui, sans-serif; }
       .loading { height: 100%; display: flex; align-items: center;
         justify-content: center; flex-direction: column; gap: 18px; }
-      .spinner { width: 38px; height: 38px; border: 3px solid #e4e4e4;
-        border-top-color: #57977b; border-radius: 50%; animation: spin .85s linear infinite; }
+      .spinner { width: 38px; height: 38px; border: 3px solid #484848;
+        border-top-color: #e0e0e0; border-radius: 50%; animation: spin .85s linear infinite; }
       p { margin: 0; font-size: 14px; }
-      .slow { max-width: 320px; text-align: center; line-height: 1.6; color: #777; }
+      .slow { max-width: 320px; text-align: center; line-height: 1.6; color: #b0b0b0; }
       [hidden] { display: none !important; }
-      button { margin-top: 12px; padding: 8px 16px; border: 1px solid #ddd;
-        border-radius: 6px; background: white; color: #454545; cursor: pointer; font: inherit; }
+      button { margin-top: 12px; padding: 8px 16px; border: 1px solid #626262;
+        border-radius: 6px; background: #363636; color: #e0e0e0; cursor: pointer; font: inherit; }
       @keyframes spin { to { transform: rotate(360deg); } }
       @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
     </style>

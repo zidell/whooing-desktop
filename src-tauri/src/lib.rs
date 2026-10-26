@@ -428,6 +428,7 @@ pub fn run() {
         let navigation_app_handle = app.handle().clone();
         let mut main_window =
           WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            .background_color(tauri::webview::Color(37, 37, 37, 255))
             .title(app.config().product_name.as_deref().unwrap_or("Whooing"))
             .inner_size(1280.0, 800.0)
             .min_inner_size(380.0, 600.0)

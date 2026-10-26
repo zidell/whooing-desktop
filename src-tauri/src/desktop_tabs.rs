@@ -198,6 +198,7 @@ pub fn setup(app: &tauri::App, start_url: Url, home: Url) -> tauri::Result<()> {
   #[cfg(target_os = "macos")]
   install_macos_menu(app)?;
   let shell = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("tabs.html".into()))
+    .background_color(tauri::webview::Color(37, 37, 37, 255))
     .title("Whooing")
     .inner_size(1280., 800.)
     .min_inner_size(380., 600.)
@@ -372,6 +373,7 @@ fn create(
   let popup_id = id.clone();
   let title_app = app.clone();
   let builder = WebviewBuilder::new(&id, WebviewUrl::External(url.clone()))
+    .background_color(tauri::webview::Color(37, 37, 37, 255))
     .focused(false)
     .initialization_script(LOADING_SCRIPT)
     .initialization_script(desktop_info_script(app))
