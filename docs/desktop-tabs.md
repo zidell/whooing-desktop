@@ -1,6 +1,6 @@
 # 데스크톱 멀티탭
 
-Windows·macOS·Linux 모두 로컬 탭바 웹뷰와 콘텐츠용 child webview를 사용하는 공통 구현이다. 탭이 하나면 탭바와 해당 공간을 숨기고 두 개 이상이면 높이 32 논리 픽셀로 표시한다. Windows/macOS는 콘텐츠 좌표·높이를 조정하고 Linux는 GTK box packing과 shell 표시 여부를 조정한다. 탭 색상은 OS 라이트/다크 설정을 따른다.
+Windows·macOS·Linux 모두 로컬 탭바 웹뷰와 콘텐츠용 child webview를 사용하는 공통 구현이다. 탭이 하나면 탭바와 해당 공간을 숨기고 두 개 이상이면 높이 32 논리 픽셀로 표시한다. Windows/macOS는 콘텐츠 좌표·높이를 조정하고 Linux는 GTK box packing과 높이를 제한한 shell 컨테이너의 표시 여부를 조정한다. 탭 색상은 OS 라이트/다크 설정을 따른다.
 
 주소표시줄과 뒤로·앞으로 버튼은 없다. 새 탭, 닫기, 복제, 닫은 탭 다시 열기, 드래그 순서 변경, 가로 스크롤과 활성 탭 자동 노출을 제공한다. 우클릭 메뉴에는 복제·좌우 이동·닫기·다른 탭 닫기·오른쪽 탭 닫기·닫은 탭 다시 열기가 있다. 가운데 클릭으로 닫을 수 있다. 마지막 탭을 닫으면 창도 닫힌다. 복제는 현재 콘텐츠 URL을 읽어 원본 바로 뒤에 추가한다. 닫은 탭은 메모리에서 최대 20개까지 원래 위치로 복원하며 인증·결제 URL은 복구 대상에서 제외한다.
 
@@ -70,3 +70,26 @@ Rust 테스트 11개(링크·도메인·OAuth·단일 탭바·숫자 선택·순
 2026-10-25 macOS에서 release 빌드를 `/Applications/Whooing.app`에 설치해 확인했다. Cmd+T로 탭은 생성되지만 콘텐츠가 탭바를 가리는 현상이 있었다. 실제 WKWebView 좌표를 계측한 결과 콘텐츠에는 요청한 32px 탭바 높이가 적용됐지만, 로컬 탭바 HTML이 피하는 제목 표시줄의 safe area 28px를 콘텐츠 배치에서 빠뜨렸다. macOS는 네이티브 부모 뷰의 크기와 `safeAreaInsets().top`을 기준으로 콘텐츠 위치·높이를 계산하도록 수정했고, 두 탭에서 탭바와 웹페이지가 겹치지 않는 것을 실제 화면으로 확인했다. Windows/Linux의 기존 위치 계산은 유지한다. 로컬 release 빌드도 macOS 자동 업데이트 대상이며, 원격 릴리즈 설치 후 필요할 때 로컬 소스를 다시 빌드·설치하는 방식으로 사용한다.
 
 같은 macOS 실행본에서 탭 선택 시 제목·닫기 버튼이 약 16px 이동하는 현상도 확인했다. 탭의 flex basis만 지정하면 탭 목록의 내용 기준 너비가 실제 탭 너비보다 작게 계산돼, 두 탭만 있어도 선택에 따라 가로 스크롤이 생겼다. 공통 CSS에 탭 너비 180px를 명시하고 제목은 별도 span에서 왼쪽 정렬·말줄임 처리한다. 선택 시 자동 스크롤은 DOM 갱신이 끝난 뒤 탭 목록의 scrollLeft만 조정하며, 제목이 같으면 텍스트 노드를 다시 쓰지 않는다. 수정본을 리빌드·설치하고 Cmd+1/Cmd+2로 번갈아 선택해 탭 버튼 중심 946/1126과 닫기 버튼 중심 1034/1214가 유지되는 것을 desk 화면으로 확인했다. Windows/Linux는 같은 CSS·JavaScript 경로를 사용하며 실행 검증은 macOS에서 수행했다.
+
+
+## Linux 탭바가 콘텐츠를 아래로 미는 문제
+
+2026-11-01 KDE Wayland/WebKitGTK에서 한 탭은 정상이고, 두 번째 탭을 열면 탭바 아래에 큰 빈 공간이 생기거나 콘텐츠가 창 아래로 밀리는 문제를 재현했다. GTK 할당 시점의 측정에서 shell의 preferred height는 최소 32px·natural 890px였고, 실제로 752px를 배정받았다. GtkBox packing의 expand/fill은 모두 false였으며 실제 부모도 해당 GtkBox였다. `set_size_request(-1, 32)`는 최소 높이만 지정하므로 WebKitGTK가 제안하는 큰 natural height를 제한하지 못했다.
+
+Linux shell을 최소·최대 콘텐츠 높이 32px인 GtkScrolledWindow에 넣고 natural height 전파에 상한을 적용한다. 스크롤바는 표시하지 않고, 탭 하나일 때는 컨테이너까지 숨긴다. 콘텐츠 웹뷰만 나머지 공간을 확장해 받는다. 컨테이너는 세로 박스의 첫 위치에 한 번만 추가하며 창 크기 변경이나 탭 추가·닫기에서 재사용한다. 임시 측정 코드는 배포본에 포함하지 않는다.
+
+이 원인은 Linux에서 여러 웹뷰를 GtkBox에 쌓으며 웹뷰의 natural height를 제한하지 않는 다른 Tauri 앱에도 적용될 수 있다. 단일 웹뷰 앱이나 모든 Tauri 앱에 발생한다고 일반화할 근거는 없다. 의존 라이브러리 Wry 0.55.1과 0.57.0 모두 GtkBox 부모에는 `pack_start(webview, true, true, 0)`를 사용하고, 좌표 기반 `set_bounds`는 GtkFixed 부모에서만 적용한다. 따라서 라이브러리 버전만 바꾸는 방식으로 해결하지 않는다.
+
+Windows/WebView2는 `SetBounds`와 `SetWindowPos`, macOS/WKWebView는 부모 좌표계에 맞춘 `setFrame`으로 콘텐츠 경계를 적용한다. 후잉은 두 OS에서 탭바 32px를 뺀 콘텐츠 영역을 직접 계산하며 macOS에서는 제목 표시줄 safe area도 포함한다. 이번 GTK natural height 원인이 두 OS에 적용되지는 않는다. 이번 작업의 실행 검증 대상은 Linux이며 Windows/macOS는 앱 코드와 Wry 구현, 앞 절의 기존 실행 검증 기록을 확인한 범위다.
+
+
+## Linux Ctrl+Tab / Ctrl+Shift+Tab
+
+2026-11-01 Linux 실행본에서 마우스로 탭을 선택하면 전환되지만 콘텐츠에 포커스가 있을 때 Ctrl+Tab과 Ctrl+Shift+Tab은 모두 전환되지 않는 것을 재현했다. 기존 JavaScript 키 판정 테스트는 통과했으므로 DOM 이벤트의 판정 함수만으로 실제 입력 경로를 보장할 수 없었다. Linux는 GTK host window의 key-press-event에서 두 조합을 받아 기존 탭 작업 큐의 Cycle로 전달하고 이벤트를 소비한다. 따라서 웹뷰·탭바·입력칸 포커스와 관계없이 같은 전환 경로를 사용하며 JavaScript와 중복 처리하지 않는다.
+
+역방향은 Shift modifier뿐 아니라 XKB의 ISO_Left_Tab keysym도 처리한다. 일반 Tab/Shift+Tab과 Alt·Super·Meta가 추가된 조합은 가로채지 않고 Caps Lock 등 상태 비트는 허용한다. Windows/macOS의 기존 단축키 경로는 유지한다.
+
+
+최종 Linux release 실행본에서 탭 1개일 때 탭바·여백 제거, 탭 2개 이상에서 32px 탭바와 정상 콘텐츠 영역, 마우스 탭 선택, 최대화, 탭 닫기와 재생성을 화면으로 확인했다. 단축키 수정 후 세 탭에서 Ctrl+Shift+Tab의 3→2 전환과 Ctrl+Tab의 2→3 전환, 검색 입력칸에 포커스를 둔 상태의 전환도 확인했다. Rust 테스트 12개와 Windows/Linux/macOS 키 판정 Node 테스트 4개가 통과했다. 이 기기에 cargo-fmt가 없어 자동 포맷 검사는 실행하지 못했으며 빌드와 diff 공백 검사는 통과했다.
+
+이 Linux 기기의 개발 소스는 `~/Sites/whooing-desktop`에서 수정하고, 기존 바로가기 `com.whooing.desktop.desktop`가 가리키는 `~/Projects/whooing-desktop/src-tauri/target/release/whooing-desktop`에 최종 release 바이너리를 반영했다. 실제 실행 프로세스와 `whooing://` 핸들러가 해당 Projects 실행본을 사용하는 것도 확인했다. 임시 검증용 바로가기와 높이 측정 로그는 제거했다.

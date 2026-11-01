@@ -185,6 +185,24 @@ pub fn tabs_action(
     .map_err(|_| "Tab worker stopped".into())
 }
 
+// GTK handles Ctrl+Tab as focus traversal before WebKit's DOM keydown path.
+// Handle both directions at the host window, including XKB's shifted Tab keysym.
+#[cfg(target_os = "linux")]
+fn linux_tab_cycle(key: gtk::gdk::keys::Key, modifiers: gtk::gdk::ModifierType) -> Option<i32> {
+  use gtk::gdk::{keys::constants, ModifierType};
+  if !modifiers.contains(ModifierType::CONTROL_MASK)
+    || modifiers.intersects(ModifierType::MOD1_MASK | ModifierType::SUPER_MASK | ModifierType::META_MASK)
+    || !matches!(key, constants::Tab | constants::ISO_Left_Tab | constants::KP_Tab)
+  {
+    return None;
+  }
+  Some(if modifiers.contains(ModifierType::SHIFT_MASK) || key == constants::ISO_Left_Tab {
+    -1
+  } else {
+    1
+  })
+}
+
 pub fn setup(app: &tauri::App, start_url: Url, home: Url) -> tauri::Result<()> {
   let (sender, receiver) = mpsc::channel();
   app.manage(DesktopTabs {
@@ -206,6 +224,19 @@ pub fn setup(app: &tauri::App, start_url: Url, home: Url) -> tauri::Result<()> {
     .on_navigation(is_internal_url)
     .on_new_window(|_, _| NewWindowResponse::Deny)
     .build()?;
+  #[cfg(target_os = "linux")]
+  {
+    use gtk::prelude::*;
+    let handle = app.handle().clone();
+    shell.gtk_window()?.connect_key_press_event(move |_, event| {
+      if let Some(direction) = linux_tab_cycle(event.keyval(), event.state()) {
+        send(&handle, Action::Cycle(direction));
+        gtk::glib::Propagation::Stop
+      } else {
+        gtk::glib::Propagation::Proceed
+      }
+    });
+  }
   let handle = app.handle().clone();
   shell.on_window_event(move |event| {
     if matches!(
@@ -319,13 +350,41 @@ fn resize(app: &AppHandle) -> tauri::Result<()> {
     view.with_webview(move |platform| {
       if let Ok(container) = window.default_vbox() {
         let widget = platform.inner();
-        // WebKitGTK packs children into a GtkBox and ignores coordinate bounds.
-        // Let GTK allocate all remaining space to the visible content instead.
-        container.set_child_packing(&widget, !is_shell, !is_shell, 0, gtk::PackType::Start);
-        widget.set_vexpand(!is_shell);
+        // GtkBox honors WebKitGTK's natural height, not just size_request's
+        // minimum. The shell can request a previous full-window height (890px
+        // observed), even with expand/fill disabled. Cap its natural height in
+        // a scrolled container so only the content receives remaining space.
         if is_shell {
+          // GTK may insert a GtkViewport around a non-Scrollable webview.
+          let frame = widget
+            .ancestor(gtk::ScrolledWindow::static_type())
+            .and_then(|parent| parent.downcast::<gtk::ScrolledWindow>().ok())
+            .unwrap_or_else(|| {
+              let frame = gtk::ScrolledWindow::builder()
+                .hscrollbar_policy(gtk::PolicyType::External)
+                .vscrollbar_policy(gtk::PolicyType::External)
+                .min_content_height(CHROME_HEIGHT as i32)
+                .max_content_height(CHROME_HEIGHT as i32)
+                .propagate_natural_height(true)
+                .hexpand(true)
+                .vexpand(false)
+                .build();
+              container.remove(&widget);
+              frame.add(&widget);
+              container.pack_start(&frame, false, false, 0);
+              container.reorder_child(&frame, 0);
+              frame
+            });
           widget.set_size_request(-1, CHROME_HEIGHT as i32);
-          widget.set_visible(visible);
+          if visible {
+            // Also show GTK's automatically inserted viewport.
+            frame.show_all();
+          } else {
+            frame.hide();
+          }
+        } else {
+          container.set_child_packing(&widget, true, true, 0, gtk::PackType::Start);
+          widget.set_vexpand(true);
         }
       }
     })?;
@@ -867,6 +926,23 @@ fn perform(app: &AppHandle, action: Action, next_id: &mut usize) -> tauri::Resul
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[cfg(target_os = "linux")]
+  #[test]
+  fn linux_ctrl_tab_handles_shifted_keysyms_without_stealing_other_shortcuts() {
+    use gtk::gdk::{keys::constants as key, ModifierType as mods};
+    assert_eq!(linux_tab_cycle(key::Tab, mods::CONTROL_MASK), Some(1));
+    assert_eq!(linux_tab_cycle(key::Tab, mods::CONTROL_MASK | mods::SHIFT_MASK), Some(-1));
+    assert_eq!(linux_tab_cycle(key::ISO_Left_Tab, mods::CONTROL_MASK), Some(-1));
+    assert_eq!(linux_tab_cycle(key::ISO_Left_Tab, mods::CONTROL_MASK | mods::SHIFT_MASK), Some(-1));
+    assert_eq!(linux_tab_cycle(key::KP_Tab, mods::CONTROL_MASK | mods::LOCK_MASK), Some(1));
+    assert_eq!(linux_tab_cycle(key::Tab, mods::empty()), None);
+    assert_eq!(linux_tab_cycle(key::ISO_Left_Tab, mods::SHIFT_MASK), None);
+    for extra in [mods::MOD1_MASK, mods::SUPER_MASK, mods::META_MASK] {
+      assert_eq!(linux_tab_cycle(key::Tab, mods::CONTROL_MASK | extra), None);
+    }
+    assert_eq!(linux_tab_cycle(key::t, mods::CONTROL_MASK), None);
+  }
 
   #[test]
   fn numbers_select_positions_and_nine_always_selects_last() {
