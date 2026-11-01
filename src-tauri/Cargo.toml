@@ -39,7 +39,5 @@ gtk = { version = "0.18", features = ["v3_24"] }
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-sys-locale = "0.3"
-tauri-plugin-dialog = "2"
 tauri-plugin-updater = "2"
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "WKWebView"] }
