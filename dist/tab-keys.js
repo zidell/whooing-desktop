@@ -8,6 +8,9 @@
       const key = event.key.toLowerCase();
       if (event.ctrlKey && !event.metaKey && key === 'tab') return event.shiftKey ? 'previous' : 'next';
       if (!primary) return null;
+      if (key === '+' || key === '=') return 'zoom-in';
+      if (key === '-') return 'zoom-out';
+      if (key === '0' && !event.shiftKey) return 'zoom-reset';
       if (!event.shiftKey && /^[1-9]$/.test(key)) return 'select-' + key;
       if (key === 't') return event.shiftKey ? 'reopen' : 'new';
       if (key === 'w' && !event.shiftKey) return 'close';

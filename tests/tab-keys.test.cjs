@@ -12,7 +12,14 @@ for (const platform of ['Win32', 'Linux x86_64', 'MacIntel']) {
   const primary = platform === 'MacIntel' ? { metaKey: true } : { ctrlKey: true };
   test(platform + ': direct tab selection and basic utilities', () => {
     for (let digit = 1; digit <= 9; digit++) assert.equal(action(String(digit), primary), 'select-' + digit);
-    assert.equal(action('0', primary), null);
+    assert.equal(action('0', primary), 'zoom-reset');
+    assert.equal(action('=', primary), 'zoom-in');
+    assert.equal(action('+', { ...primary, shiftKey: true }), 'zoom-in');
+    assert.equal(action('+', { ...primary, code: 'NumpadAdd' }), 'zoom-in');
+    assert.equal(action('-', primary), 'zoom-out');
+    assert.equal(action('-', { ...primary, code: 'NumpadSubtract' }), 'zoom-out');
+    assert.equal(action('=', { ...primary, altKey: true }), null);
+    assert.equal(action('+'), null);
     assert.equal(action('T', { ...primary, shiftKey: true }), 'reopen');
     assert.equal(action('t', primary), 'new');
     assert.equal(action('w', primary), 'close');

@@ -16,6 +16,7 @@ Windows·macOS·Linux 모두 로컬 탭바 웹뷰와 콘텐츠용 child webview�
 | 이전 / 다음 탭 | Primary+PageUp / Primary+PageDown |
 | 탭 좌우 이동 | Primary+Shift+PageUp / Primary+Shift+PageDown |
 | 새로고침 | Primary+R |
+| 화면 확대 / 축소 / 100% 복원 | Primary++ (또는 Primary+=) / Primary+- / Primary+0 |
 
 macOS Cmd+Tab은 시스템 앱 전환으로 유지한다. macOS는 기본 앱 메뉴의 탭 단축키와 WKWebView 방문 기록 스와이프도 연결한다. Windows/Linux 콘텐츠의 Alt+좌우 방문 기록 이동을 유지한다. 탭바에서는 좌우/Home/End로 선택하고 Shift+F10으로 메뉴를 열 수 있다. 탭 하나일 때도 단축키와 새 창 링크로 탭을 추가할 수 있다.
 
@@ -93,3 +94,12 @@ Windows/WebView2는 `SetBounds`와 `SetWindowPos`, macOS/WKWebView는 부모 좌
 최종 Linux release 실행본에서 탭 1개일 때 탭바·여백 제거, 탭 2개 이상에서 32px 탭바와 정상 콘텐츠 영역, 마우스 탭 선택, 최대화, 탭 닫기와 재생성을 화면으로 확인했다. 단축키 수정 후 세 탭에서 Ctrl+Shift+Tab의 3→2 전환과 Ctrl+Tab의 2→3 전환, 검색 입력칸에 포커스를 둔 상태의 전환도 확인했다. Rust 테스트 12개와 Windows/Linux/macOS 키 판정 Node 테스트 4개가 통과했다. 이 기기에 cargo-fmt가 없어 자동 포맷 검사는 실행하지 못했으며 빌드와 diff 공백 검사는 통과했다.
 
 이 Linux 기기의 개발 소스는 `~/Sites/whooing-desktop`에서 수정하고, 기존 바로가기 `com.whooing.desktop.desktop`가 가리키는 `~/Projects/whooing-desktop/src-tauri/target/release/whooing-desktop`에 최종 release 바이너리를 반영했다. 실제 실행 프로세스와 `whooing://` 핸들러가 해당 Projects 실행본을 사용하는 것도 확인했다. 임시 검증용 바로가기와 높이 측정 로그는 제거했다.
+
+
+## 화면 확대·축소
+
+확대 단축키는 콘텐츠와 로컬 탭바의 공통 키 판정에서 받아 기존 탭 작업 큐를 거쳐 활성 콘텐츠 웹뷰의 `set_zoom`을 호출한다. 일반 키보드의 +·=·-와 숫자 키패드의 +·-를 지원한다. 탭바 크기는 유지하며 콘텐츠를 10%p씩 50~300% 범위에서 조절하고 Primary+0으로 100%로 복원한다. 배율은 탭별 메모리에 저장해 탭 전환·새로고침 때 유지하며, 새 탭과 닫았다 복구한 탭은 100%로 시작한다. 앱 재실행 후에는 초기화한다.
+
+Tauri 기반 Wry의 확대 단축키 옵션은 기본 false이고 Windows에만 적용된다. Linux/WebKitGTK와 macOS/WKWebView에는 해당 옵션이 구현돼 있지 않으므로, 세 OS 공통으로 단축키를 명시적으로 연결한다. 네이티브 확대 API는 각각 WebKitGTK `set_zoom_level`, WebView2 `SetZoomFactor`, WKWebView `setPageZoom`을 사용한다.
+
+2026-11-01 확대·축소 변경의 Rust 테스트 12개, Windows/Linux/macOS 공통 키 판정 Node 테스트 4개, JavaScript 문법 검사와 Linux release 빌드가 통과했다. 화면 인식 중 로컬 Tesseract 시간 초과가 발생했고 이후 사용자 컴퓨터 제어 중지 신호를 받아 UI 검증을 중단했다. 이 변경은 Sites 소스에 반영했으며 Projects의 기존 실행본 교체·재시작은 수행하지 않았다. Windows/macOS는 공통 단축키 경로와 네이티브 확대 API 구현을 코드로 확인한 범위다.

@@ -21,6 +21,8 @@ const CHROME_HEIGHT: f64 = 32.;
 pub struct Tab {
   id: String,
   title: String,
+  #[serde(skip)]
+  zoom_percent: i32,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -53,6 +55,7 @@ enum Action {
   Close(String),
   Cycle(i32),
   Reload(String),
+  Zoom(String, i32),
   Resize,
   DeepLink(Url),
   SelectDigit(usize),
@@ -150,6 +153,9 @@ pub fn tabs_action(
     "next" => Action::Cycle(1),
     "previous" => Action::Cycle(-1),
     "reload" => Action::Reload(id),
+    "zoom-in" => Action::Zoom(id, 10),
+    "zoom-out" => Action::Zoom(id, -10),
+    "zoom-reset" => Action::Zoom(id, 0),
     "duplicate" => Action::Duplicate(id),
     "move" => Action::Move {
       id,
@@ -406,6 +412,9 @@ fn shortcut(app: &AppHandle, id: &str, url: &Url) {
     "previous" => send(app, Action::Cycle(-1)),
     "duplicate" => send(app, Action::Duplicate(id.into())),
     "reopen" => send(app, Action::Reopen),
+    "zoom-in" => send(app, Action::Zoom(id.into(), 10)),
+    "zoom-out" => send(app, Action::Zoom(id.into(), -10)),
+    "zoom-reset" => send(app, Action::Zoom(id.into(), 0)),
     "move-left" => send(app, Action::MoveBy(id.into(), -1)),
     "move-right" => send(app, Action::MoveBy(id.into(), 1)),
     name if name.starts_with("select-") => {
@@ -483,6 +492,7 @@ fn create(
   let tab = Tab {
     id: id.clone(),
     title: url.host_str().unwrap_or("Whooing").into(),
+    zoom_percent: 100,
   };
   {
     let state = app.state::<DesktopTabs>();
@@ -797,6 +807,31 @@ fn perform(app: &AppHandle, action: Action, next_id: &mut usize) -> tauri::Resul
         view.reload()?;
       }
     }
+    Action::Zoom(id, delta) => {
+      let current = snapshot(app);
+      if let (Some(tab), Some(view)) = (
+        current.tabs.iter().find(|tab| tab.id == id),
+        app.get_webview(&id),
+      ) {
+        let percent = if delta == 0 {
+          100
+        } else {
+          (tab.zoom_percent + delta).clamp(50, 300)
+        };
+        view.set_zoom(f64::from(percent) / 100.)?;
+        if let Some(tab) = app
+          .state::<DesktopTabs>()
+          .snapshot
+          .lock()
+          .unwrap()
+          .tabs
+          .iter_mut()
+          .find(|tab| tab.id == id)
+        {
+          tab.zoom_percent = percent;
+        }
+      }
+    }
     Action::Resize => {
       resize(app)?;
     }
@@ -962,6 +997,7 @@ mod tests {
       .map(|id| Tab {
         id: id.into(),
         title: id.into(),
+        zoom_percent: 100,
       })
       .collect();
     let ids = |tabs: &[Tab]| tabs.iter().map(|tab| tab.id.as_str()).collect::<String>();
@@ -1006,6 +1042,7 @@ mod tests {
     let tab = Tab {
       id: "page-1".into(),
       title: "Report".into(),
+      zoom_percent: 100,
     };
     assert_eq!(
       serde_json::to_value(tab).unwrap(),
