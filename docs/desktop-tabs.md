@@ -103,3 +103,8 @@ Windows/WebView2는 `SetBounds`와 `SetWindowPos`, macOS/WKWebView는 부모 좌
 Tauri 기반 Wry의 확대 단축키 옵션은 기본 false이고 Windows에만 적용된다. Linux/WebKitGTK와 macOS/WKWebView에는 해당 옵션이 구현돼 있지 않으므로, 세 OS 공통으로 단축키를 명시적으로 연결한다. 네이티브 확대 API는 각각 WebKitGTK `set_zoom_level`, WebView2 `SetZoomFactor`, WKWebView `setPageZoom`을 사용한다.
 
 2026-11-01 확대·축소 변경의 Rust 테스트 12개, Windows/Linux/macOS 공통 키 판정 Node 테스트 4개, JavaScript 문법 검사와 Linux release 빌드가 통과했다. 화면 인식 중 로컬 Tesseract 시간 초과가 발생했고 이후 사용자 컴퓨터 제어 중지 신호를 받아 UI 검증을 중단했다. 이 변경은 Sites 소스에 반영했으며 Projects의 기존 실행본 교체·재시작은 수행하지 않았다. Windows/macOS는 공통 단축키 경로와 네이티브 확대 API 구현을 코드로 확인한 범위다.
+
+
+같은 날 사용자 요청으로 설치본 검증을 재개했다. Sites 소스의 최종 release 빌드를 다시 확인하고 기존 Projects 실행 파일에 설치했다. 기존 바로가기 `com.whooing.desktop.desktop`로 재실행했으며 `/proc/<pid>/exe` 경로와 SHA-256이 빌드 결과와 일치하는 것을 확인했다. `whooing://` 기본 핸들러도 같은 바로가기다.
+
+Linux/KDE Wayland의 실제 후잉 화면에서 Ctrl+=로 110%, Ctrl+Shift+=로 120%, Ctrl+-로 110%, Ctrl+0으로 100%, 다시 Ctrl+-로 90%가 되는 화면 변화를 desk로 확인했다. 90%에서 새로고침한 뒤 새 탭을 열고 원래 탭으로 돌아왔을 때 90%가 유지되고 새 탭은 100%인 것도 확인했다. 검증용 새 탭은 닫고 원래 탭을 100%로 복원해 새 실행본을 계속 실행 중으로 두었다. Windows/macOS의 이번 변경은 코드 확인과 공통 키 판정 테스트 범위이며 실제 실행 검증은 Linux에서 수행했다.
