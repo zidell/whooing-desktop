@@ -1,6 +1,9 @@
 //! Desktop tab chrome lives in a trusted local webview. Content webviews never
 //! receive tab-management IPC permissions, including when showing external sites.
-use std::sync::{mpsc, Mutex};
+use std::{
+  path::Path,
+  sync::{mpsc, Mutex},
+};
 
 use serde::Serialize;
 use tauri::{
@@ -21,8 +24,6 @@ const CHROME_HEIGHT: f64 = 32.;
 pub struct Tab {
   id: String,
   title: String,
-  #[serde(skip)]
-  zoom_percent: i32,
 }
 
 #[derive(Clone, Default, Serialize)]
@@ -46,6 +47,7 @@ pub struct DesktopTabs {
   sender: mpsc::Sender<Action>,
   closed: Mutex<Vec<ClosedTab>>,
   context_menu: Mutex<Option<Menu<tauri::Wry>>>,
+  zoom_percent: Mutex<i32>,
 }
 
 enum Action {
@@ -55,7 +57,7 @@ enum Action {
   Close(String),
   Cycle(i32),
   Reload(String),
-  Zoom(String, i32),
+  Zoom(i32),
   Resize,
   DeepLink(Url),
   SelectDigit(usize),
@@ -67,6 +69,37 @@ enum Action {
   CloseRight(String),
   History(String, bool),
   Context(String, f64, f64),
+}
+
+// One native app preference, independent of website storage and tab lifetimes.
+fn load_zoom(path: &Path) -> i32 {
+  match std::fs::read(path) {
+    Ok(bytes) => serde_json::from_slice::<i32>(&bytes)
+      .ok()
+      .filter(|percent| (50..=300).contains(percent))
+      .unwrap_or(100),
+    Err(error) => {
+      if error.kind() != std::io::ErrorKind::NotFound {
+        log::warn!("Could not load zoom preference: {error}");
+      }
+      100
+    }
+  }
+}
+
+fn save_zoom(path: &Path, percent: i32) -> std::io::Result<()> {
+  if let Some(parent) = path.parent() {
+    std::fs::create_dir_all(parent)?;
+  }
+  std::fs::write(path, percent.to_string())
+}
+
+fn next_zoom(percent: i32, delta: i32) -> i32 {
+  if delta == 0 {
+    100
+  } else {
+    (percent + delta).clamp(50, 300)
+  }
 }
 
 fn send(app: &AppHandle, action: Action) {
@@ -153,9 +186,9 @@ pub fn tabs_action(
     "next" => Action::Cycle(1),
     "previous" => Action::Cycle(-1),
     "reload" => Action::Reload(id),
-    "zoom-in" => Action::Zoom(id, 10),
-    "zoom-out" => Action::Zoom(id, -10),
-    "zoom-reset" => Action::Zoom(id, 0),
+    "zoom-in" => Action::Zoom(10),
+    "zoom-out" => Action::Zoom(-10),
+    "zoom-reset" => Action::Zoom(0),
     "duplicate" => Action::Duplicate(id),
     "move" => Action::Move {
       id,
@@ -217,6 +250,7 @@ pub fn setup(app: &tauri::App, start_url: Url, home: Url) -> tauri::Result<()> {
     sender,
     closed: Mutex::default(),
     context_menu: Mutex::default(),
+    zoom_percent: Mutex::new(load_zoom(&app.path().app_config_dir()?.join("zoom.json"))),
   });
   app.on_menu_event(on_menu_event);
   #[cfg(target_os = "macos")]
@@ -412,9 +446,9 @@ fn shortcut(app: &AppHandle, id: &str, url: &Url) {
     "previous" => send(app, Action::Cycle(-1)),
     "duplicate" => send(app, Action::Duplicate(id.into())),
     "reopen" => send(app, Action::Reopen),
-    "zoom-in" => send(app, Action::Zoom(id.into(), 10)),
-    "zoom-out" => send(app, Action::Zoom(id.into(), -10)),
-    "zoom-reset" => send(app, Action::Zoom(id.into(), 0)),
+    "zoom-in" => send(app, Action::Zoom(10)),
+    "zoom-out" => send(app, Action::Zoom(-10)),
+    "zoom-reset" => send(app, Action::Zoom(0)),
     "move-left" => send(app, Action::MoveBy(id.into(), -1)),
     "move-right" => send(app, Action::MoveBy(id.into(), 1)),
     name if name.starts_with("select-") => {
@@ -492,7 +526,6 @@ fn create(
   let tab = Tab {
     id: id.clone(),
     title: url.host_str().unwrap_or("Whooing").into(),
-    zoom_percent: 100,
   };
   {
     let state = app.state::<DesktopTabs>();
@@ -516,6 +549,7 @@ fn create(
       return Err(error);
     }
   };
+  view.set_zoom(f64::from(*app.state::<DesktopTabs>().zoom_percent.lock().unwrap()) / 100.)?;
   #[cfg(target_os = "macos")]
   view.with_webview(|platform| {
     // with_webview runs on the main thread; this is the child WKWebView.
@@ -807,28 +841,18 @@ fn perform(app: &AppHandle, action: Action, next_id: &mut usize) -> tauri::Resul
         view.reload()?;
       }
     }
-    Action::Zoom(id, delta) => {
-      let current = snapshot(app);
-      if let (Some(tab), Some(view)) = (
-        current.tabs.iter().find(|tab| tab.id == id),
-        app.get_webview(&id),
-      ) {
-        let percent = if delta == 0 {
-          100
-        } else {
-          (tab.zoom_percent + delta).clamp(50, 300)
-        };
-        view.set_zoom(f64::from(percent) / 100.)?;
-        if let Some(tab) = app
-          .state::<DesktopTabs>()
-          .snapshot
-          .lock()
-          .unwrap()
-          .tabs
-          .iter_mut()
-          .find(|tab| tab.id == id)
-        {
-          tab.zoom_percent = percent;
+    Action::Zoom(delta) => {
+      let percent = {
+        let state = app.state::<DesktopTabs>();
+        let mut percent = state.zoom_percent.lock().unwrap();
+        let next = next_zoom(*percent, delta);
+        save_zoom(&app.path().app_config_dir()?.join("zoom.json"), next)?;
+        *percent = next;
+        next
+      };
+      for tab in snapshot(app).tabs {
+        if let Some(view) = app.get_webview(&tab.id) {
+          view.set_zoom(f64::from(percent) / 100.)?;
         }
       }
     }
@@ -962,6 +986,26 @@ fn perform(app: &AppHandle, action: Action, next_id: &mut usize) -> tauri::Resul
 mod tests {
   use super::*;
 
+  #[test]
+  fn app_zoom_survives_reload_and_reset_and_rejects_invalid_preferences() {
+    let directory = std::env::temp_dir().join(format!("whooing-zoom-test-{}", std::process::id()));
+    let path = directory.join("zoom.json");
+    assert_eq!(load_zoom(&path), 100);
+    save_zoom(&path, next_zoom(100, 10)).unwrap();
+    assert_eq!(load_zoom(&path), 110);
+    save_zoom(&path, next_zoom(load_zoom(&path), -10)).unwrap();
+    assert_eq!(load_zoom(&path), 100);
+    save_zoom(&path, next_zoom(150, 0)).unwrap();
+    assert_eq!(load_zoom(&path), 100);
+    assert_eq!(next_zoom(50, -10), 50);
+    assert_eq!(next_zoom(300, 10), 300);
+    for invalid in ["broken", "null", "49", "301", "110.5"] {
+      std::fs::write(&path, invalid).unwrap();
+      assert_eq!(load_zoom(&path), 100);
+    }
+    std::fs::remove_dir_all(directory).unwrap();
+  }
+
   #[cfg(target_os = "linux")]
   #[test]
   fn linux_ctrl_tab_handles_shifted_keysyms_without_stealing_other_shortcuts() {
@@ -997,7 +1041,6 @@ mod tests {
       .map(|id| Tab {
         id: id.into(),
         title: id.into(),
-        zoom_percent: 100,
       })
       .collect();
     let ids = |tabs: &[Tab]| tabs.iter().map(|tab| tab.id.as_str()).collect::<String>();
@@ -1042,7 +1085,6 @@ mod tests {
     let tab = Tab {
       id: "page-1".into(),
       title: "Report".into(),
-      zoom_percent: 100,
     };
     assert_eq!(
       serde_json::to_value(tab).unwrap(),
